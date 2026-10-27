@@ -1,0 +1,9 @@
+[project]
+name = "whale-friend"
+version = "0.1.0"
+description = "A local desktop companion with traceable memory and recoverable backups"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+whale-friend = "whale_friend.__main__:main"
