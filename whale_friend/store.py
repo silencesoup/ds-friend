@@ -48,6 +48,12 @@ CREATE TABLE IF NOT EXISTS journal_sources (
     journal_id INTEGER NOT NULL REFERENCES journals(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS forgotten_sources (message_id INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS proactive_messages (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id),
+    trigger_user_id INTEGER NOT NULL REFERENCES messages(id),
+    day TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS proactive_trigger ON proactive_messages(trigger_user_id);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 PRAGMA user_version=1;
 """
@@ -104,8 +110,44 @@ class Store:
         self.execute("UPDATE messages SET content=?,status=? WHERE id=?", (content, status, identity))
 
     def messages(self, session: str, complete_only=False) -> list[dict]:
-        clause = " AND status='complete'" if complete_only else ""
-        return self.rows("SELECT * FROM messages WHERE session_id=?" + clause + " ORDER BY id", (session,))
+        clause = " AND m.status='complete'" if complete_only else ""
+        return self.rows("SELECT m.*,p.message_id IS NOT NULL AS proactive FROM messages m LEFT JOIN proactive_messages p ON p.message_id=m.id WHERE m.session_id=?" + clause + " ORDER BY m.id", (session,))
+
+    def latest_user(self) -> dict | None:
+        rows = self.rows("SELECT * FROM messages WHERE role='user' AND status='complete' ORDER BY id DESC LIMIT 1")
+        return rows[0] if rows else None
+
+    def add_proactive(self, user: dict, content: str, timestamp: str) -> int:
+        with self.lock, self.db:
+            current = self.latest_user()
+            if not current or current["id"] != user["id"]:
+                raise ValueError("用户已开始新的交流，取消这封主动来信")
+            if self.db.execute("SELECT 1 FROM proactive_messages WHERE trigger_user_id=?", (user["id"],)).fetchone():
+                raise ValueError("这段等待期间已经主动联系过")
+            cursor = self.db.execute("INSERT INTO messages(session_id,role,content,status,created_at,day) VALUES (?,'assistant',?,'complete',?,?)", (user["session_id"], content, timestamp, timestamp[:10]))
+            identity = cursor.lastrowid
+            self.db.execute("INSERT INTO proactive_messages VALUES (?,?,?,?)", (identity, user["id"], timestamp[:10], timestamp))
+            return identity
+
+    def remember_preference(self, slot: str, value: str, content: str, source_id: int) -> None:
+        with self.lock, self.db:
+            source = self.db.execute("SELECT role,status FROM messages WHERE id=?", (source_id,)).fetchone()
+            if not source or source["role"] != "user" or source["status"] != "complete":
+                return
+            if self.db.execute("SELECT 1 FROM forgotten_sources WHERE message_id=?", (source_id,)).fetchone():
+                return
+            mapping = json.loads(self.meta("interaction_preferences", "{}"))
+            previous = mapping.get(slot, {})
+            row = self.db.execute("SELECT id FROM memories WHERE id=? AND kind='相处偏好'", (previous.get("memory_id", -1),)).fetchone()
+            stamp = now()
+            if row:
+                identity = row["id"]
+                self.db.execute("UPDATE memories SET content=?,source_ids=?,updated_at=? WHERE id=?", (content, json.dumps([source_id]), stamp, identity))
+            else:
+                cursor = self.db.execute("INSERT INTO memories(kind,content,source_ids,created_at,updated_at) VALUES ('相处偏好',?,?,?,?)", (content, json.dumps([source_id]), stamp, stamp))
+                identity = cursor.lastrowid
+            mapping[slot] = {"value": value, "memory_id": identity}
+            self.db.execute("INSERT INTO meta VALUES ('interaction_preferences',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(mapping, ensure_ascii=False),))
 
     def message_sources(self, identities: list[int]) -> list[dict]:
         if not identities:
@@ -179,7 +221,7 @@ class Store:
             self.db.execute("DELETE FROM summaries")
 
     def unjournaled(self) -> list[dict]:
-        return self.rows("SELECT m.* FROM messages m LEFT JOIN journal_sources s ON s.message_id=m.id WHERE s.message_id IS NULL AND m.status='complete' ORDER BY m.day,m.id")
+        return self.rows("SELECT m.*,p.message_id IS NOT NULL AS proactive FROM messages m LEFT JOIN journal_sources s ON s.message_id=m.id LEFT JOIN proactive_messages p ON p.message_id=m.id WHERE s.message_id IS NULL AND m.status='complete' ORDER BY m.day,m.id")
 
     def add_journal(self, day: str, title: str, content: str, sources: list[int], facts: list[dict]) -> int:
         with self.lock, self.db:

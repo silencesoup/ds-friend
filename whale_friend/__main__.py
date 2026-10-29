@@ -32,12 +32,20 @@ def main():
     try:
         guard.bind(("127.0.0.1", 47631))
     except OSError:
+        from .tray import show_existing
+        try:
+            if show_existing():
+                guard.close()
+                return 0
+        except OSError:
+            pass
         import tkinter as tk
         from tkinter import messagebox
         window = tk.Tk()
         window.withdraw()
         messagebox.showinfo("小屋已经打开", "鲸鱼娘的小屋已在运行，请切换到已有窗口。")
         window.destroy()
+        guard.close()
         return 1
     try:
         from .app import Desktop

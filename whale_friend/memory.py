@@ -31,7 +31,7 @@ def fit_text(text: str, budget: int) -> str:
 
 
 def transcript(messages: list[dict]) -> str:
-    return "\n".join(f"[消息#{m['id']} {m['created_at']} {m['session_id'][:6]}] {'用户' if m['role']=='user' else '助手'}：{m['content']}" for m in messages)
+    return "\n".join(f"[消息#{m['id']} {m['created_at']} {m['session_id'][:6]}] {'用户' if m['role']=='user' else '助手主动来信' if m.get('proactive') else '助手'}：{m['content']}" for m in messages)
 
 
 def json_object(text: str) -> dict:
@@ -49,6 +49,7 @@ class MemoryEngine:
         self.store, self.model, self.settings = store, model, settings
         self.lock = threading.RLock()
         self.last_error = ""
+        self.runtime_context = lambda: ""
 
     def persona(self) -> str:
         appearance = (ROOT / "character_info.txt").read_text(encoding="utf-8-sig") if (ROOT / "character_info.txt").exists() else "蓝色长发、鲸鱼鳍耳和鲸尾的 Q 版女仆鲸鱼娘。"
@@ -98,10 +99,11 @@ class MemoryEngine:
                 # Preserve behavior rules if the appearance file is unusually large.
                 persona = fit_text(persona, total // 2)
             remaining = total - tokens(persona)
-            facts = "\n".join(f"[记忆#{m['id']} {m['kind']} 更新于{m['updated_at']}] {m['content']}" for m in self.store.memories())
+            memories = sorted(self.store.memories(), key=lambda row: row["kind"] != "相处偏好")
+            facts = "\n".join(f"[记忆#{m['id']} {m['kind']} 更新于{m['updated_at']}] {m['content']}" for m in memories)
             facts = fit_text(facts, max(100, remaining // 5))
             history = fit_text(self.retrieval(query), max(100, remaining // 4))
-            extras = "记忆资料：\n" + (facts or "暂无") + "\n\n历史日志（只有相关命中才提供）：\n" + (history or "暂无命中；不要编造过去的对话。")
+            extras = self.runtime_context() + "\n记忆资料：\n" + (facts or "暂无") + "\n\n历史日志（只有相关命中才提供）：\n" + (history or "暂无命中；不要编造过去的对话。")
             remaining -= tokens(extras)
             summary_budget = max(180, remaining // 4)
             history_budget = remaining - summary_budget - 100

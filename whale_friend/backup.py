@@ -60,6 +60,11 @@ class Backups:
                 db.row_factory = sqlite3.Row
                 for table in ("sessions", "memories", "summaries"):
                     files[f"exports/{table}.json"] = json.dumps([dict(row) for row in db.execute(f"SELECT * FROM {table}")], ensure_ascii=False, indent=2).encode("utf-8")
+                tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if "proactive_messages" in tables:
+                    files["exports/proactive_messages.json"] = json.dumps([dict(row) for row in db.execute("SELECT * FROM proactive_messages")], ensure_ascii=False, indent=2).encode("utf-8")
+                interaction = {row["key"]: row["value"] for row in db.execute("SELECT key,value FROM meta WHERE key IN ('companion_state','interaction_preferences','reflection_through','initiative_plan','proactive_skipped_user_id','proactive_retry_after')")}
+                files["exports/interaction_state.json"] = json.dumps(interaction, ensure_ascii=False, indent=2).encode("utf-8")
                 messages = [dict(row) for row in db.execute("SELECT * FROM messages ORDER BY id")]
                 files["exports/messages.jsonl"] = ("\n".join(json.dumps(row, ensure_ascii=False) for row in messages) + "\n").encode("utf-8")
                 journals = [dict(row) for row in db.execute("SELECT * FROM journals ORDER BY day,part")]

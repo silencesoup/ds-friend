@@ -57,6 +57,14 @@ class Settings:
     idle_minutes: int = 15
     backup_minutes: int = 5
     backup_keep: int = 20
+    proactive_enabled: bool = True
+    proactive_min_minutes: int = 15
+    proactive_max_minutes: int = 120
+    proactive_cooldown_minutes: int = 120
+    proactive_daily_limit: int = 3
+    quiet_start_hour: int = 22
+    quiet_end_hour: int = 8
+    adaptive_enabled: bool = True
 
     def validate(self) -> None:
         if not self.character_name.strip() or not self.user_name.strip():
@@ -72,6 +80,16 @@ class Settings:
             raise ValueError("请求超时应在 10 到 600 秒之间")
         if not 1000 <= self.journal_chunk_chars <= 30000:
             raise ValueError("日志分段大小应在 1000 到 30000 字符之间")
+        if type(self.proactive_enabled) is not bool or type(self.adaptive_enabled) is not bool:
+            raise ValueError("主动聊天与互动学习的开关必须为布尔值")
+        if not 1 <= self.proactive_min_minutes <= self.proactive_max_minutes <= 1440:
+            raise ValueError("主动聊天浮动范围应在 1–1440 分钟之间，最短等待不能大于最长等待")
+        if not 1 <= self.proactive_cooldown_minutes <= 10080:
+            raise ValueError("主动聊天冷却时间应为 1–10080 分钟")
+        if not 1 <= self.proactive_daily_limit <= 20:
+            raise ValueError("主动聊天每日上限应为 1–20 次")
+        if not 0 <= self.quiet_start_hour <= 23 or not 0 <= self.quiet_end_hour <= 23:
+            raise ValueError("免打扰时段请填写 0–23 点；起止时间相同表示不设时段")
         self.data_dir = str(Path(self.data_dir).expanduser().resolve())
         if self.backup_dir.strip():
             backup = Path(self.backup_dir).expanduser().resolve()

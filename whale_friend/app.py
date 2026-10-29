@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from .backup import Backups
 from .config import LOCAL, ROOT, Settings
 from .service import Companion
+from .tray import UnreadMessages, WindowsTray
 
 NAVY = "#132D4B"
 BLUE = "#327CEC"
@@ -43,11 +44,11 @@ def readonly(widget: tk.Text, text: str):
 
 
 class Desktop(tk.Tk):
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, core: Companion | None = None):
         super().__init__()
         self.settings = settings
         try:
-            self.core = Companion(settings)
+            self.core = core or Companion(settings)
         except Exception:
             self.destroy()
             raise
@@ -61,7 +62,13 @@ class Desktop(tk.Tk):
         self.streaming_start = None
         self.model_label = "连接中"
         self.chat_error = ""
-        self.title(f"{settings.character_name} · 鲸鱼娘的海边小屋")
+        self.proactive_session = None
+        self.unread = UnreadMessages()
+        self.tray = None
+        self.hidden_to_tray = False
+        self.exiting = False
+        self.base_title = f"{settings.character_name} · 鲸鱼娘的海边小屋"
+        self.title(self.base_title)
         self.geometry("1260x850")
         self.minsize(1050, 740)
         self.configure(bg=PALE)
@@ -76,10 +83,67 @@ class Desktop(tk.Tk):
         self._refresh_sessions()
         self._render_chat()
         self._switch("chat")
+        self._setup_background_window()
+        self.bind("<FocusIn>", self._on_focus, add="+")
         self.after(80, self._poll)
         self.after(1500, self._tick)
         self.core.connect()
         self.core.maintain()
+
+    def _setup_background_window(self):
+        menu = tk.Menu(self)
+        house = tk.Menu(menu, tearoff=False)
+        house.add_command(label="显示小屋", command=self._show_window)
+        house.add_command(label="隐藏到托盘" if sys.platform == "win32" else "最小化到 Dock", command=self._close)
+        house.add_separator()
+        house.add_command(label="退出小屋", command=self._exit_app)
+        menu.add_cascade(label="小屋", menu=house)
+        self.configure(menu=menu)
+        if sys.platform == "win32":
+            tray = WindowsTray(self.settings.character_name)
+            if tray.start():
+                self.tray = tray
+            else:
+                tray.close()
+                self.status.configure(text="系统托盘暂不可用，点关闭将最小化；可从“小屋”菜单退出。")
+
+    def _reading(self, session):
+        if self.hidden_to_tray or self.state() != "normal" or self.page != "chat" or self.session != session:
+            return False
+        if self.tray:
+            return self.tray.foreground(self.winfo_id())
+        return self.focus_displayof() is not None
+
+    def _update_unread(self):
+        count = self.unread.count
+        if self.tray:
+            self.tray.set_unread(count)
+        self.title(self.base_title + (f" · {count} 条未读" if count else ""))
+        self._refresh_sessions()
+
+    def _incoming(self, session):
+        self.unread.receive(session, reading=self._reading(session))
+        self._update_unread()
+
+    def _on_focus(self, event=None):
+        if not self.exiting and self._reading(self.session) and self.session in self.unread.sessions:
+            self.unread.read(self.session)
+            self._update_unread()
+
+    def _show_window(self):
+        target = self.unread.latest
+        self.hidden_to_tray = False
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+        if self.tray:
+            self.tray.focus(self.winfo_id())
+        # Do not change the conversation under a draft or a running reply.
+        if target and not self.core.chat_pending and not self.input.get("1.0", "end-1c").strip():
+            self.session = target
+            self._switch("chat")
+            self._render_chat()
+        self.after(100, self._on_focus)
 
     def _build(self):
         self.sidebar = tk.Frame(self, bg=NAVY, width=234)
@@ -104,7 +168,7 @@ class Desktop(tk.Tk):
         self.sessions_list.pack(fill="both", expand=True, padx=20, pady=12)
         self.sessions_list.bind("<<ListboxSelect>>", self._select_session)
         portrait = tk.Frame(self.sidebar, bg="#EAF2FF")
-        portrait.pack(fill="x", padx=16, pady=(0, 18))
+        portrait.pack(side="bottom", fill="x", padx=16, pady=(0, 18), before=self.sessions_list)
         art_path = ROOT / "assets" / "character-reference.png"
         if art_path.exists():
             self.reference = tk.PhotoImage(file=str(art_path))
@@ -114,7 +178,9 @@ class Desktop(tk.Tk):
             canvas = tk.Canvas(portrait, width=202, height=220, bg=WHITE, bd=0, highlightthickness=0)
             canvas.pack(fill="x")
             canvas.create_image(11, 5, image=self.portrait, anchor="nw")
-        label(portrait, "本鱼在这里，慢慢说就好。", 9, "#4D6E98", "#EAF2FF").pack(pady=10)
+        self.mood_label = label(portrait, "本鱼现在 · 平静", 9, "#4D6E98", "#EAF2FF")
+        self.mood_label.pack(pady=(8, 0))
+        label(portrait, "本鱼在这里，慢慢说就好。", 9, "#4D6E98", "#EAF2FF").pack(pady=(3, 8))
         self.content = tk.Frame(self, bg=PALE)
         self.content.pack(side="left", fill="both", expand=True)
         header = tk.Frame(self.content, bg=PALE)
@@ -127,6 +193,7 @@ class Desktop(tk.Tk):
         self.subtitle.pack(anchor="w", pady=(6, 0))
         self.connection = label(header, "●  正在连接", 9, "#5B8BBE", PALE)
         self.connection.pack(side="right", anchor="n", pady=5)
+        self.proactive_button = button(header, "本鱼的新来信 →", self._open_proactive)
         self.pages = {}
         for name in ("chat", "memories", "journals", "settings"):
             self.pages[name] = tk.Frame(self.content, bg=PALE)
@@ -192,7 +259,7 @@ class Desktop(tk.Tk):
         label(right, "长期记忆", 16, bold=True).pack(anchor="w")
         label(right, "可修正、可删除；自动提取的内容请核对来源。", 9, MUTED, wraplength=430, justify="left").pack(anchor="w", pady=(5, 18))
         self.memory_kind = tk.StringVar(value="事实")
-        kinds = ttk.Combobox(right, textvariable=self.memory_kind, values=("偏好", "称呼", "目标", "事实"), state="readonly", width=16)
+        kinds = ttk.Combobox(right, textvariable=self.memory_kind, values=("偏好", "称呼", "目标", "事实", "相处偏好"), state="readonly", width=16)
         kinds.pack(anchor="w", pady=(0, 10))
         self.memory_text = tk.Text(right, height=5, bg=PALE, fg=INK, wrap="word", bd=0, padx=12, pady=12, undo=True)
         self.memory_text.pack(fill="x")
@@ -259,6 +326,20 @@ class Desktop(tk.Tk):
         self._setting_field(form, "character_name", "界面名字（自称为 本鱼 / 本鲸鱼 / 我）")
         self._setting_field(form, "user_name", "本鱼怎样称呼你")
         tk.Frame(form, height=1, bg=LINE).pack(fill="x", pady=15)
+        label(form, "一起慢慢熟悉", 16, bold=True).pack(anchor="w", pady=(5, 12))
+        for key, title in (("proactive_enabled", "允许本鱼选择合适的时机主动来信"), ("adaptive_enabled", "记住互动语气，并从明确反馈学习相处偏好")):
+            variable = tk.BooleanVar(value=getattr(self.settings, key))
+            self.setting_vars[key] = variable
+            tk.Checkbutton(form, text=title, variable=variable, bg=WHITE, fg=INK, activebackground=WHITE, selectcolor=PALE, anchor="w").pack(anchor="w", pady=5)
+        label(form, "主动来信使用浮动时机：结合话题是否适合延续、你说要忙的时间与回应节奏来选，到了候选时间也可以不打扰。\n应用需保持运行；未获回应时不连续追问；输入框有草稿时先保持安静。", 9, MUTED, wraplength=700, justify="left").pack(anchor="w", pady=(6, 16))
+        self._setting_field(form, "proactive_min_minutes", "候选时机最短等待（分钟）")
+        self._setting_field(form, "proactive_max_minutes", "候选时机最长等待（分钟；不保证到点发送）")
+        self._setting_field(form, "proactive_cooldown_minutes", "两封主动来信的最短间隔（分钟）")
+        self._setting_field(form, "proactive_daily_limit", "每天主动来信最多几次")
+        self._setting_field(form, "quiet_start_hour", "夜间免打扰开始（本机时间，0–23 点）")
+        self._setting_field(form, "quiet_end_hour", "夜间免打扰结束（起止相同则关闭此时段）")
+        label(form, "相处偏好保存在“记忆收藏夹”，可查看来源并修改。情绪只影响语气，随时间缓和；不会因为你没回复而扣好感或变得生气。", 9, MUTED, wraplength=700, justify="left").pack(anchor="w", pady=(6, 12))
+        tk.Frame(form, height=1, bg=LINE).pack(fill="x", pady=15)
         label(form, "模型与记忆", 16, bold=True).pack(anchor="w", pady=(5, 16))
         label(form, "服务地址和密钥从仓库 .env 读取；模型名称留空时自动发现。", 9, MUTED).pack(anchor="w", pady=(0, 10))
         self._setting_field(form, "model", "模型名称")
@@ -302,13 +383,15 @@ class Desktop(tk.Tk):
             self._refresh_journals()
         elif name == "settings":
             self._update_backup_status()
+        self._on_focus()
 
     def _refresh_sessions(self):
         sessions = self.core.store.sessions()
         self.session_ids = [item["id"] for item in sessions]
         self.sessions_list.delete(0, "end")
         for item in sessions:
-            self.sessions_list.insert("end", "  " + item["title"])
+            marker = "● " if item["id"] in self.unread.sessions else "  "
+            self.sessions_list.insert("end", marker + item["title"])
         if self.session in self.session_ids:
             index = self.session_ids.index(self.session)
             self.sessions_list.selection_set(index)
@@ -345,6 +428,8 @@ class Desktop(tk.Tk):
             self.chat_text.insert("end", "这些是小屋的欢迎语。真正的回复来自你配置的本地模型。\n", "hint")
         for message in messages:
             name = self.settings.user_name if message["role"] == "user" else self.settings.character_name
+            if message.get("proactive"):
+                name += " · 主动来信"
             if message["role"] == "user" and name == "你":
                 name = "你"
             self.chat_text.insert("end", f"{name}   {message['created_at'][11:16]}\n", "user_name" if message["role"] == "user" else "name")
@@ -428,7 +513,7 @@ class Desktop(tk.Tk):
         self.memory_list.selection_clear(0, "end")
 
     def _require_idle(self) -> bool:
-        if self.core.chat_pending or self.core.maintenance_pending or self.core.operation or not self.core.tasks.empty():
+        if self.core.chat_pending or self.core.maintenance_pending or self.core.proactive_pending or self.core.reflection_pending or self.core.operation or not self.core.tasks.empty():
             self._notice("正在处理模型请求或整理数据，请稍后再进行此操作。")
             return False
         return True
@@ -524,7 +609,10 @@ class Desktop(tk.Tk):
         try:
             values = asdict(self.settings)
             for key, variable in self.setting_vars.items():
-                values[key] = int(variable.get()) if isinstance(getattr(self.settings, key), int) else variable.get().strip()
+                if isinstance(getattr(self.settings, key), bool):
+                    values[key] = bool(variable.get())
+                else:
+                    values[key] = int(variable.get()) if isinstance(getattr(self.settings, key), int) else variable.get().strip()
             updated = Settings(**values)
             updated.validate()
             destination = Path(updated.data_dir)
@@ -570,6 +658,20 @@ class Desktop(tk.Tk):
         messagebox.showinfo("本鱼的小提示", text, parent=self)
 
     def _poll(self):
+        if self.exiting:
+            return
+        if self.tray:
+            try:
+                while True:
+                    action = self.tray.actions.get_nowait()
+                    if action == "exit":
+                        self._exit_app()
+                        if self.exiting:
+                            return
+                    elif action == "show":
+                        self._show_window()
+            except queue.Empty:
+                pass
         try:
             while True:
                 event = self.core.events.get_nowait()
@@ -589,6 +691,7 @@ class Desktop(tk.Tk):
                     self.chat_text.configure(state="disabled")
                     self.chat_text.see("end")
                 elif kind == "reply_done":
+                    self._incoming(event["session"])
                     self.status.configure(text="来信已保存。还有什么想和本鱼说的？")
                 elif kind == "reply_error":
                     self.chat_error = event["message"]
@@ -599,6 +702,19 @@ class Desktop(tk.Tk):
                 elif kind == "chat_finished":
                     self._set_busy(False)
                     self._render_chat()
+                elif kind == "presence_updated":
+                    self.mood_label.configure(text="本鱼现在 · " + event["mood"])
+                    if self.page == "memories":
+                        self._refresh_memories()
+                elif kind == "proactive_done":
+                    self._incoming(event["session"])
+                    self._refresh_sessions()
+                    if event["session"] == self.session and self.page == "chat":
+                        self._render_chat()
+                    else:
+                        self.proactive_session = event["session"]
+                        self.proactive_button.pack(side="right", padx=(0, 12))
+                    self.status.configure(text="本鱼发来一封新的主动来信，不用急着回复。")
                 elif kind == "status":
                     self.status.configure(text=event["text"])
                 elif kind == "maintenance_done":
@@ -626,13 +742,45 @@ class Desktop(tk.Tk):
             self.after(60, self._poll)
 
     def _tick(self):
-        self.core.maintain()
+        composing = bool(self.input.get("1.0", "end-1c").strip())
+        if not self.core.maybe_proactive(composing=composing):
+            self.core.maintain()
+        self.mood_label.configure(text="本鱼现在 · " + self.core.presence.mood()["mood"])
         self._update_backup_status()
         self.after(60_000, self._tick)
 
+    def _open_proactive(self):
+        if self.core.chat_pending:
+            self._notice("先等当前回复完成，再查看本鱼的来信。")
+            return
+        if self.proactive_session:
+            self.session = self.proactive_session
+            self._refresh_sessions()
+            self._render_chat()
+            self._switch("chat")
+        self.proactive_session = None
+        self.proactive_button.pack_forget()
+
     def _close(self, restarting=False):
+        if restarting:
+            self._exit_app(restarting=True)
+            return
+        if self.tray and self.tray.available:
+            self.hidden_to_tray = True
+            self.withdraw()
+        else:
+            # Dock/taskbar fallback keeps background work alive if no tray is available.
+            self.iconify()
+
+    def _exit_app(self, restarting=False):
+        if self.exiting:
+            return
         if self.core.chat_pending and not restarting:
-            if not messagebox.askyesno("关闭小屋", "本鱼还在回复，关闭会停止生成。收到的内容和已保存的消息会保留。继续关闭吗？", parent=self):
+            self._show_window()
+            if not messagebox.askyesno("退出小屋", "本鱼还在回复，退出会停止生成。收到的内容和已保存的消息会保留。继续退出吗？", parent=self):
                 return
+        self.exiting = True
+        if self.tray:
+            self.tray.close()
         self.core.shutdown()
         self.destroy()

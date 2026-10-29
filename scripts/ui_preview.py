@@ -8,5 +8,6 @@ from whale_friend.app import Desktop
 from whale_friend.config import LOCAL, Settings
 
 app = Desktop(Settings(data_dir=str(LOCAL / "ui-check" / "data"), backup_dir=str(LOCAL / "ui-check" / "backups")))
-app.title("开发验证 · 小肥鱼的海边小屋")
+app.base_title = "开发验证 · 小肥鱼的海边小屋"
+app.title(app.base_title)
 app.mainloop()
