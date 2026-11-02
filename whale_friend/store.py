@@ -54,6 +54,20 @@ CREATE TABLE IF NOT EXISTS proactive_messages (
     day TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS proactive_trigger ON proactive_messages(trigger_user_id);
+CREATE TABLE IF NOT EXISTS media_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, sha256 TEXT NOT NULL UNIQUE,
+    relative_path TEXT NOT NULL, mime TEXT NOT NULL, original_name TEXT NOT NULL,
+    title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]',
+    allow_reuse INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0,
+    source_kind TEXT NOT NULL, source_url TEXT NOT NULL DEFAULT '',
+    width INTEGER NOT NULL, height INTEGER NOT NULL, frames INTEGER NOT NULL, byte_size INTEGER NOT NULL,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS message_assets (
+    message_id INTEGER NOT NULL REFERENCES messages(id), asset_id INTEGER NOT NULL REFERENCES media_assets(id),
+    ordinal INTEGER NOT NULL, metadata TEXT NOT NULL,
+    PRIMARY KEY(message_id,asset_id)
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 PRAGMA user_version=1;
 """
@@ -102,22 +116,57 @@ class Store:
     def sessions(self) -> list[dict]:
         return self.rows("SELECT s.*, MAX(m.id) AS latest FROM sessions s LEFT JOIN messages m ON m.session_id=s.id GROUP BY s.id ORDER BY COALESCE(MAX(m.id),0) DESC,s.created_at DESC")
 
-    def add_message(self, session: str, role: str, content: str, status="complete", timestamp=None) -> int:
+    def add_message(self, session: str, role: str, content: str, status="complete", timestamp=None, attachments=None) -> int:
         stamp = timestamp or now()
-        return self.execute("INSERT INTO messages(session_id,role,content,status,created_at,day) VALUES (?,?,?,?,?,?)", (session, role, content, status, stamp, stamp[:10]))
+        with self.lock, self.db:
+            cursor = self.db.execute("INSERT INTO messages(session_id,role,content,status,created_at,day) VALUES (?,?,?,?,?,?)", (session, role, content, status, stamp, stamp[:10]))
+            self._attach(cursor.lastrowid, attachments or [])
+            return cursor.lastrowid
 
-    def finish_message(self, identity: int, content: str, status="complete") -> None:
-        self.execute("UPDATE messages SET content=?,status=? WHERE id=?", (content, status, identity))
+    def _attach(self, message_id: int, identities: list[int]) -> None:
+        for ordinal, identity in enumerate(dict.fromkeys(identities)):
+            asset = self.db.execute("SELECT * FROM media_assets WHERE id=? AND archived=0", (identity,)).fetchone()
+            if not asset:
+                raise ValueError("所选图片不存在或已移出图库")
+            metadata = {key: asset[key] for key in ("title", "description", "tags")}
+            self.db.execute("INSERT INTO message_assets VALUES (?,?,?,?)", (message_id, identity, ordinal, json.dumps(metadata, ensure_ascii=False)))
+
+    def attach_images(self, message_id: int, identities: list[int]) -> None:
+        with self.lock, self.db:
+            self._attach(message_id, identities)
+
+    def _with_attachments(self, messages: list[dict]) -> list[dict]:
+        if not messages:
+            return messages
+        lookup = {row["id"]: row for row in messages}
+        for row in messages:
+            row["attachments"] = []
+        identities = list(lookup)
+        with self.lock:
+            for start in range(0, len(identities), 800):
+                batch = identities[start:start + 800]
+                attachments = self.rows("SELECT a.*,l.message_id,l.metadata FROM message_assets l JOIN media_assets a ON a.id=l.asset_id WHERE l.message_id IN (" + ",".join("?" for _ in batch) + ") ORDER BY l.message_id,l.ordinal", batch)
+                for attachment in attachments:
+                    attachment.update(json.loads(attachment.pop("metadata")))
+                    attachment["tags"] = json.loads(attachment["tags"])
+                    lookup[attachment.pop("message_id")]["attachments"].append(attachment)
+        return messages
+
+    def finish_message(self, identity: int, content: str, status="complete", attachments=None) -> None:
+        with self.lock, self.db:
+            self.db.execute("UPDATE messages SET content=?,status=? WHERE id=?", (content, status, identity))
+            if attachments is not None:
+                self._attach(identity, attachments)
 
     def messages(self, session: str, complete_only=False) -> list[dict]:
         clause = " AND m.status='complete'" if complete_only else ""
-        return self.rows("SELECT m.*,p.message_id IS NOT NULL AS proactive FROM messages m LEFT JOIN proactive_messages p ON p.message_id=m.id WHERE m.session_id=?" + clause + " ORDER BY m.id", (session,))
+        return self._with_attachments(self.rows("SELECT m.*,p.message_id IS NOT NULL AS proactive FROM messages m LEFT JOIN proactive_messages p ON p.message_id=m.id WHERE m.session_id=?" + clause + " ORDER BY m.id", (session,)))
 
     def latest_user(self) -> dict | None:
         rows = self.rows("SELECT * FROM messages WHERE role='user' AND status='complete' ORDER BY id DESC LIMIT 1")
         return rows[0] if rows else None
 
-    def add_proactive(self, user: dict, content: str, timestamp: str) -> int:
+    def add_proactive(self, user: dict, content: str, timestamp: str, attachments=None) -> int:
         with self.lock, self.db:
             current = self.latest_user()
             if not current or current["id"] != user["id"]:
@@ -127,6 +176,7 @@ class Store:
             cursor = self.db.execute("INSERT INTO messages(session_id,role,content,status,created_at,day) VALUES (?,'assistant',?,'complete',?,?)", (user["session_id"], content, timestamp, timestamp[:10]))
             identity = cursor.lastrowid
             self.db.execute("INSERT INTO proactive_messages VALUES (?,?,?,?)", (identity, user["id"], timestamp[:10], timestamp))
+            self._attach(identity, attachments or [])
             return identity
 
     def remember_preference(self, slot: str, value: str, content: str, source_id: int) -> None:
@@ -152,7 +202,7 @@ class Store:
     def message_sources(self, identities: list[int]) -> list[dict]:
         if not identities:
             return []
-        return self.rows("SELECT * FROM messages WHERE id IN (" + ",".join("?" for _ in identities) + ") ORDER BY id", identities)
+        return self._with_attachments(self.rows("SELECT * FROM messages WHERE id IN (" + ",".join("?" for _ in identities) + ") ORDER BY id", identities))
 
     def summary(self, session: str) -> dict:
         rows = self.rows("SELECT * FROM summaries WHERE session_id=?", (session,))
@@ -211,6 +261,8 @@ class Store:
                             for journal in self.rows("SELECT journal_id FROM journal_sources WHERE message_id=?", (item["id"],)):
                                 self.db.execute("DELETE FROM journals WHERE id=?", (journal["journal_id"],))
                             self.db.execute("UPDATE messages SET content='[此消息已按用户要求删除]',status='erased' WHERE id=?", (item["id"],))
+                            self.db.execute("UPDATE media_assets SET allow_reuse=0 WHERE id IN (SELECT asset_id FROM message_assets WHERE message_id=?)", (item["id"],))
+                            self.db.execute("DELETE FROM message_assets WHERE message_id=?", (item["id"],))
             self.db.execute("DELETE FROM memories WHERE id=?", (identity,))
             if erase_sources and ids:
                 # Other derived memories can quote the same source exchange.
@@ -221,7 +273,7 @@ class Store:
             self.db.execute("DELETE FROM summaries")
 
     def unjournaled(self) -> list[dict]:
-        return self.rows("SELECT m.*,p.message_id IS NOT NULL AS proactive FROM messages m LEFT JOIN journal_sources s ON s.message_id=m.id LEFT JOIN proactive_messages p ON p.message_id=m.id WHERE s.message_id IS NULL AND m.status='complete' ORDER BY m.day,m.id")
+        return self._with_attachments(self.rows("SELECT m.*,p.message_id IS NOT NULL AS proactive FROM messages m LEFT JOIN journal_sources s ON s.message_id=m.id LEFT JOIN proactive_messages p ON p.message_id=m.id WHERE s.message_id IS NULL AND m.status='complete' ORDER BY m.day,m.id"))
 
     def add_journal(self, day: str, title: str, content: str, sources: list[int], facts: list[dict]) -> int:
         with self.lock, self.db:

@@ -11,6 +11,7 @@ from .memory import MemoryEngine
 from .model import Cancelled, ModelClient
 from .presence import Presence, local_time
 from .store import Store, now
+from .assets import AssetError, AssetLibrary, MAX_ATTACHMENTS, StickerFilter
 
 
 class Companion:
@@ -21,6 +22,7 @@ class Companion:
         self.settings = settings
         self.model = model or ModelClient(settings)
         self.store = store or Store(Path(settings.data_dir))
+        self.assets = AssetLibrary(self.store)
         self.memory = MemoryEngine(self.store, self.model, settings)
         self.presence = Presence(self.store, self.model, settings)
         self.memory.runtime_context = self.presence.context
@@ -73,7 +75,15 @@ class Companion:
             self.emit("connected", model=name)
         self._enqueue(0, work, "连接模型")
 
-    def send(self, session: str, text: str, retry=False):
+    def send(self, session: str, text: str, retry=False, attachments=None):
+        attachments = list(dict.fromkeys(attachments or []))
+        if len(attachments) > MAX_ATTACHMENTS:
+            raise ValueError(f"每条消息最多附 {MAX_ATTACHMENTS} 张图片")
+        for asset_id in attachments:
+            self.assets.path(asset_id)
+        text = text.strip() or ("[图片]" if attachments else "")
+        if not text:
+            raise ValueError("先写一条消息或选择图片")
         with self.state_lock:
             if self.chat_pending:
                 raise ValueError("请等待当前回复结束，或先停止生成")
@@ -85,7 +95,7 @@ class Companion:
             threading.Thread(target=self.model.interrupt, daemon=True).start()
         try:
             if not retry:
-                identity = self.store.add_message(session, "user", text.strip())
+                identity = self.store.add_message(session, "user", text.strip(), attachments=attachments)
                 if len(self.store.messages(session)) == 1:
                     self.store.execute("UPDATE sessions SET title=? WHERE id=?", (text.strip().replace("\n", " ")[:22], session))
                 self.emit("user_saved", session=session, identity=identity)
@@ -102,19 +112,30 @@ class Companion:
             succeeded = False
             try:
                 self.emit("status", text="正在回忆，听你说…")
-                context = self.memory.build_context(session, text, self.cancel)
+                catalog = self.assets.catalog(text + " " + self.presence.mood()["mood"], limit=3 if self.settings.context_tokens >= 8192 else 1)
+                context = self.memory.build_context(session, text, self.cancel, image_catalog=catalog)
+                sticker_filter = StickerFilter([row["id"] for row in catalog])
                 if self.cancel.is_set():
                     raise Cancelled("已停止生成")
                 assistant = self.store.add_message(session, "assistant", "", "pending")
                 self.emit("reply_start", session=session, identity=assistant)
                 last_save = time.monotonic()
                 for chunk in self.model.stream(context, self.cancel):
+                    chunk = sticker_filter.feed(chunk)
                     answer += chunk
-                    self.emit("delta", session=session, text=chunk)
+                    if chunk:
+                        self.emit("delta", session=session, text=chunk)
                     if time.monotonic() - last_save >= 0.7:
                         self.store.finish_message(assistant, answer, "pending")
                         last_save = time.monotonic()
-                self.store.finish_message(assistant, answer, "complete")
+                tail = sticker_filter.feed("", final=True)
+                if tail:
+                    answer += tail
+                    self.emit("delta", session=session, text=tail)
+                selected = self.assets.reusable(sticker_filter.selected)
+                if not answer.strip() and not selected:
+                    raise ValueError("模型没有返回有效文字或可用图片，可以重试")
+                self.store.finish_message(assistant, answer, "complete", attachments=selected)
                 succeeded = True
                 self.emit("reply_done", session=session)
             except Exception as error:
@@ -166,9 +187,9 @@ class Companion:
                             path = self.backups.create()
                             self.store.set_meta("backup_error", "")
                             self.emit("backup_done", path=str(path))
-                        except Exception:
+                        except Exception as error:
                             # Paths/errors may contain sensitive filesystem details; keep a useful generic UI message.
-                            message = "备份未完成，请检查指定目录是否可写、磁盘空间及 OneDrive 文件夹是否可用。本地对话仍已保存。"
+                            message = str(error) if isinstance(error, AssetError) else "备份未完成，请检查指定目录是否可写、磁盘空间及 OneDrive 文件夹是否可用。本地对话仍已保存。"
                             self.store.set_meta("backup_error", message)
                             self.emit("maintenance_warning", message=message)
                 self.emit("maintenance_done", count=count)
@@ -224,17 +245,21 @@ class Companion:
                 current = self.presence.permits(at or local_time())
                 if not current or current["id"] != user["id"]:
                     return
-                answer = self.presence.compose(self.memory, user, self.proactive_cancel)
+                catalog = self.assets.catalog(user["content"] + " " + self.presence.mood()["mood"], limit=3 if self.settings.context_tokens >= 8192 else 1)
+                raw = self.presence.compose(self.memory, user, self.proactive_cancel, image_catalog=catalog)
+                selector = StickerFilter([row["id"] for row in catalog])
+                answer = selector.feed(raw, final=True)
+                selected = self.assets.reusable(selector.selected)
                 if self.proactive_cancel.is_set() or self.chat_pending or self.stop.is_set():
                     return
-                if not answer:
+                if not answer.strip() and not selected:
                     self.store.set_meta("proactive_skipped_user_id", str(user["id"]))
                     return
                 current = self.presence.permits(at or local_time())
                 if not current or current["id"] != user["id"]:
                     return
                 stamp = (at or local_time()).isoformat(timespec="seconds")
-                identity = self.store.add_proactive(user, answer, stamp)
+                identity = self.store.add_proactive(user, answer, stamp, attachments=selected)
                 self.store.set_meta("proactive_retry_after", "")
                 delivered = True
                 self.emit("proactive_done", session=user["session_id"], identity=identity)

@@ -49,6 +49,16 @@ if [[ -z "$python_bin" ]]; then
     exit 1
 fi
 
+if ! "$python_bin" -c 'import PIL' >/dev/null 2>&1; then
+    printf '%s\n' \
+        '图片功能需要 Pillow。请在项目目录运行：' \
+        'python3 -m venv .venv' \
+        '.venv/bin/python -m pip install -r requirements.txt' \
+        '安装后重新双击 start.command。'
+    pause_on_error
+    exit 1
+fi
+
 if [[ ! -f .env && -z "${DS_BASE_URL:-${ds_base_url:-${base_url:-}}}" ]]; then
     printf '%s\n' \
         '缺少模型配置：请在本脚本所在目录创建 .env，可参考 .env.example。' \

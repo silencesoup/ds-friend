@@ -15,8 +15,9 @@ from pathlib import Path
 
 from .config import Settings, atomic_write
 from .store import Store, now
+from .assets import AssetError, asset_path, media_records
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 MAX_RESTORE_BYTES = 512 * 1024 * 1024
 REQUIRED_TABLES = {"sessions", "messages", "memories", "summaries", "journals", "journal_sources", "forgotten_sources", "meta"}
 
@@ -61,6 +62,19 @@ class Backups:
                 for table in ("sessions", "memories", "summaries"):
                     files[f"exports/{table}.json"] = json.dumps([dict(row) for row in db.execute(f"SELECT * FROM {table}")], ensure_ascii=False, indent=2).encode("utf-8")
                 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                for table in ("media_assets", "message_assets"):
+                    if table in tables:
+                        files[f"exports/{table}.json"] = json.dumps([dict(row) for row in db.execute(f"SELECT * FROM {table}")], ensure_ascii=False, indent=2).encode("utf-8")
+                for asset in media_records(db):
+                    path = asset_path(self.store.directory, asset["relative_path"], asset["sha256"])
+                    if not path.is_file():
+                        raise AssetError("部分图片文件缺失，无法生成完整恢复包")
+                    content = path.read_bytes()
+                    if digest(content) != asset["sha256"] or len(content) != asset["byte_size"]:
+                        raise AssetError("图片文件校验失败，无法生成完整恢复包")
+                    if sum(len(value) for value in files.values()) + len(content) > MAX_RESTORE_BYTES - 1024 * 1024:
+                        raise AssetError("图片与对话已超过 512 MB 恢复包上限；本地原件仍保留")
+                    files[asset["relative_path"]] = content
                 if "proactive_messages" in tables:
                     files["exports/proactive_messages.json"] = json.dumps([dict(row) for row in db.execute("SELECT * FROM proactive_messages")], ensure_ascii=False, indent=2).encode("utf-8")
                 interaction = {row["key"]: row["value"] for row in db.execute("SELECT key,value FROM meta WHERE key IN ('companion_state','interaction_preferences','reflection_through','initiative_plan','proactive_skipped_user_id','proactive_retry_after')")}
@@ -124,7 +138,7 @@ class Backups:
                 if "manifest.json" not in names or "companion.sqlite3" not in names:
                     raise ValueError("不是完整的鲸鱼娘恢复包")
                 manifest = json.loads(zip_.read("manifest.json"))
-                if not isinstance(manifest, dict) or manifest.get("format") != "whale-friend" or manifest.get("version") != FORMAT_VERSION:
+                if not isinstance(manifest, dict) or manifest.get("format") != "whale-friend" or manifest.get("version") not in (1, FORMAT_VERSION):
                     raise ValueError("恢复包版本不受支持")
                 hashes = manifest.get("files", {})
                 if not isinstance(hashes, dict) or set(hashes) != set(names) - {"manifest.json"}:
@@ -141,6 +155,17 @@ class Backups:
             candidate.write_bytes(database)
             try:
                 validate_database(candidate)
+                with closing(sqlite3.connect(candidate)) as db:
+                    assets = media_records(db)
+                with zipfile.ZipFile(archive) as zip_:
+                    for asset in assets:
+                        asset_path(Path(temporary), asset["relative_path"], asset["sha256"])
+                        path = asset["relative_path"]
+                        if path not in manifest["files"] or manifest["files"][path] != asset["sha256"]:
+                            raise AssetError("恢复包缺少图片原件或图片摘要不匹配")
+                        data = zip_.read(path)
+                        if digest(data) != asset["sha256"] or len(data) != asset["byte_size"]:
+                            raise AssetError("恢复包中的图片校验失败")
             except sqlite3.DatabaseError:
                 raise ValueError("恢复包中的数据库损坏，无法恢复") from None
         return manifest, database
@@ -152,5 +177,17 @@ class Backups:
         destination.mkdir(parents=True, exist_ok=True)
         if any(destination.iterdir()):
             raise ValueError("请选择一个空的恢复目录，现有数据不会被覆盖")
+        with tempfile.TemporaryDirectory(prefix="whale-media-restore-") as temporary:
+            snapshot = Path(temporary) / "companion.sqlite3"
+            snapshot.write_bytes(database)
+            with closing(sqlite3.connect(snapshot)) as db:
+                assets = media_records(db)
+            with zipfile.ZipFile(archive) as zip_:
+                for asset in assets:
+                    content = zip_.read(asset["relative_path"])
+                    if digest(content) != asset["sha256"]:
+                        raise AssetError("恢复时图片发生变化，请确认恢复包已同步完整")
+                    target = asset_path(destination, asset["relative_path"], asset["sha256"])
+                    atomic_write(target, content)
         atomic_write(destination / "companion.sqlite3", database)
         return manifest

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import queue
 import sys
@@ -9,11 +10,13 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from PIL import Image, ImageGrab, ImageTk
 
 from .backup import Backups
 from .config import LOCAL, ROOT, Settings
 from .service import Companion
 from .tray import UnreadMessages, WindowsTray
+from .assets import AssetError, MAX_ATTACHMENTS, MAX_IMAGE_PIXELS, copy_media
 
 NAVY = "#132D4B"
 BLUE = "#327CEC"
@@ -67,6 +70,9 @@ class Desktop(tk.Tk):
         self.tray = None
         self.hidden_to_tray = False
         self.exiting = False
+        self.pending_images = []
+        self.chat_images = []
+        self.library_window = None
         self.base_title = f"{settings.character_name} · 鲸鱼娘的海边小屋"
         self.title(self.base_title)
         self.geometry("1260x850")
@@ -94,6 +100,7 @@ class Desktop(tk.Tk):
         menu = tk.Menu(self)
         house = tk.Menu(menu, tearoff=False)
         house.add_command(label="显示小屋", command=self._show_window)
+        house.add_command(label="图片与表情包", command=self._open_library)
         house.add_command(label="隐藏到托盘" if sys.platform == "win32" else "最小化到 Dock", command=self._close)
         house.add_separator()
         house.add_command(label="退出小屋", command=self._exit_app)
@@ -139,7 +146,7 @@ class Desktop(tk.Tk):
         if self.tray:
             self.tray.focus(self.winfo_id())
         # Do not change the conversation under a draft or a running reply.
-        if target and not self.core.chat_pending and not self.input.get("1.0", "end-1c").strip():
+        if target and not self.core.chat_pending and not self.input.get("1.0", "end-1c").strip() and not self.pending_images:
             self.session = target
             self._switch("chat")
             self._render_chat()
@@ -227,9 +234,15 @@ class Desktop(tk.Tk):
         self.input = tk.Text(composer, height=3, wrap="word", bg=WHITE, fg=INK, insertbackground=BLUE, bd=0, padx=16, pady=14, undo=True, font=(FONT, 11))
         self.input.pack(fill="x")
         self.input.bind("<Return>", self._enter)
+        self.input.bind("<Control-v>", self._paste_image)
+        if sys.platform == "darwin":
+            self.input.bind("<Command-v>", self._paste_image)
+        self.attachment_bar = tk.Frame(composer, bg=WHITE)
         bar = tk.Frame(composer, bg=WHITE)
         bar.pack(fill="x", padx=16, pady=(0, 12))
-        label(bar, "Enter 发送 · Shift+Enter 换行 · 当前支持文字", 9, MUTED).pack(side="left")
+        button(bar, "发图片", self._choose_images).pack(side="left", padx=(0, 6))
+        button(bar, "图库", self._open_library).pack(side="left", padx=(0, 12))
+        label(bar, "Enter 发送 · Shift+Enter 换行", 9, MUTED).pack(side="left")
         self.send_button = button(bar, "发送来信  ↗", self._send, True)
         self.send_button.pack(side="right")
         self.stop_button = button(bar, "停止", self._stop_reply)
@@ -312,7 +325,7 @@ class Desktop(tk.Tk):
         label(form, "工作数据库放在本机；完整恢复包放进你选择的 OneDrive 文件夹。", 10, MUTED, wraplength=680, justify="left").pack(anchor="w", pady=(7, 16))
         self._setting_field(form, "data_dir", "本地工作数据目录", browse=True)
         self._setting_field(form, "backup_dir", "备份目录（可选 OneDrive 中的专用文件夹）", browse=True)
-        label(form, "备份包含原始对话、记忆、上下文摘要、日志及月度索引，不包含 .env 或 API 密钥。\n生成恢复包后仍需 OneDrive 完成同步；应用不能确认云端同步状态。", 9, MUTED, wraplength=720, justify="left").pack(anchor="w", pady=(0, 14))
+        label(form, "备份包含原始对话、图片原件、图库说明、记忆、上下文摘要与日志，不包含 .env 或 API 密钥。\n生成恢复包后仍需 OneDrive 完成同步；应用不能确认云端同步状态。", 9, MUTED, wraplength=720, justify="left").pack(anchor="w", pady=(0, 14))
         self._setting_field(form, "backup_minutes", "自动备份间隔（分钟）")
         self._setting_field(form, "backup_keep", "保留最近多少个恢复包")
         backup_actions = tk.Frame(form, bg=WHITE)
@@ -421,12 +434,13 @@ class Desktop(tk.Tk):
     def _render_chat(self, streaming=False):
         self.chat_text.configure(state="normal")
         self.chat_text.delete("1.0", "end")
+        self.chat_images = []
         messages = self.core.store.messages(self.session)
         if not messages:
             self.chat_text.insert("end", "在这里，和本鱼打个招呼吧。\n", "welcome")
             self.chat_text.insert("end", "本鱼会认真听，也会慢慢记住你。\n想聊今天的小事，还是一起琢磨一个新点子？\n\n", "assistant")
             self.chat_text.insert("end", "这些是小屋的欢迎语。真正的回复来自你配置的本地模型。\n", "hint")
-        for message in messages:
+        for message_index, message in enumerate(messages):
             name = self.settings.user_name if message["role"] == "user" else self.settings.character_name
             if message.get("proactive"):
                 name += " · 主动来信"
@@ -437,6 +451,20 @@ class Desktop(tk.Tk):
                 self.chat_text.insert("end", message["content"], message["role"])
                 continue
             self.chat_text.insert("end", message["content"] + "\n", message["role"])
+            for asset in message.get("attachments", []):
+                tag = f"image-{message['id']}-{asset['id']}"
+                start = self.chat_text.index("end-1c")
+                if message_index >= len(messages) - 40:
+                    try:
+                        photo = ImageTk.PhotoImage(self.core.assets.thumbnail(asset["id"]), master=self)
+                        self.chat_images.append(photo)
+                        self.chat_text.image_create("end", image=photo, padx=5, pady=5)
+                        self.chat_text.insert("end", "\n")
+                    except AssetError:
+                        self.chat_text.insert("end", "[图片文件暂不可用]\n", "hint")
+                self.chat_text.insert("end", f"[图片 #{asset['id']} · {asset['title']} · 点击查看]\n", "hint")
+                self.chat_text.tag_add(tag, start, "end-1c")
+                self.chat_text.tag_bind(tag, "<Button-1>", lambda event, identity=asset["id"]: self._view_image(identity))
             if message["status"] != "complete":
                 note = {"pending": "正在回复…", "interrupted": "生成已中断，可重试", "failed": "生成未完成，可重试", "erased": "已删除"}.get(message["status"], message["status"])
                 self.chat_text.insert("end", f"[{note}]\n", "hint")
@@ -451,16 +479,107 @@ class Desktop(tk.Tk):
 
     def _send(self):
         text = self.input.get("1.0", "end-1c").strip()
-        if not text:
+        if not text and not self.pending_images:
             return
         try:
             self.chat_error = ""
-            self.core.send(self.session, text)
+            self.core.send(self.session, text, attachments=list(self.pending_images))
             self.input.delete("1.0", "end")
+            self.pending_images.clear()
+            self._refresh_image_queue()
             self._set_busy(True)
             self._render_chat()
         except Exception as error:
             self._notice(str(error))
+
+    def _queue_image(self, identity):
+        asset = self.core.assets.get(identity)
+        if asset["archived"]:
+            raise AssetError("请先在图库中恢复这张图片")
+        self.core.assets.path(identity)
+        if identity not in self.pending_images:
+            if len(self.pending_images) >= MAX_ATTACHMENTS:
+                raise AssetError(f"每条消息最多选择 {MAX_ATTACHMENTS} 张图片")
+            self.pending_images.append(identity)
+        self._refresh_image_queue()
+
+    def _refresh_image_queue(self):
+        for child in self.attachment_bar.winfo_children():
+            child.destroy()
+        if not self.pending_images:
+            self.attachment_bar.pack_forget()
+            return
+        self.attachment_bar.pack(fill="x", before=self.input, padx=12, pady=(8, 0))
+        for identity in self.pending_images:
+            asset = self.core.assets.get(identity)
+            chip = tk.Frame(self.attachment_bar, bg=PALE)
+            chip.pack(side="left", padx=(0, 6))
+            tk.Button(chip, text=asset["title"][:14], command=lambda i=identity: self._view_image(i), bg=PALE, fg=INK, bd=0, padx=7, pady=5).pack(side="left")
+            tk.Button(chip, text="×", command=lambda i=identity: self._remove_image(i), bg=PALE, fg=MUTED, bd=0, padx=5).pack(side="left")
+
+    def _remove_image(self, identity):
+        if identity in self.pending_images:
+            self.pending_images.remove(identity)
+        self._refresh_image_queue()
+
+    def _choose_images(self):
+        from .media_ui import IMAGE_TYPES
+        paths = filedialog.askopenfilenames(parent=self, title="给本鱼发图片", filetypes=IMAGE_TYPES)
+        if len(paths) + len(self.pending_images) > MAX_ATTACHMENTS:
+            self._notice(f"每条消息最多选择 {MAX_ATTACHMENTS} 张图片；更多图片可先导入图库。")
+            return
+        for path in paths:
+            try:
+                self._queue_image(self.core.assets.import_file(Path(path))["id"])
+            except (AssetError, OSError) as error:
+                self._notice(str(error))
+        if paths:
+            self._assets_changed()
+
+    def _paste_image(self, event=None):
+        if sys.platform not in ("win32", "darwin"):
+            return None
+        try:
+            content = ImageGrab.grabclipboard()
+            if isinstance(content, Image.Image):
+                if content.width * content.height > MAX_IMAGE_PIXELS:
+                    raise AssetError("剪贴板图片超过 2500 万像素，请先缩小")
+                if len(self.pending_images) >= MAX_ATTACHMENTS:
+                    raise AssetError(f"每条消息最多选择 {MAX_ATTACHMENTS} 张图片")
+                buffer = io.BytesIO()
+                content.save(buffer, format="PNG")
+                self._queue_image(self.core.assets.import_bytes(buffer.getvalue(), original_name="剪贴板.png", source_kind="clipboard")["id"])
+            elif isinstance(content, list):
+                paths = [Path(path) for path in content if Path(path).suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp")]
+                if not paths:
+                    return None
+                if len(paths) + len(self.pending_images) > MAX_ATTACHMENTS:
+                    raise AssetError(f"每条消息最多选择 {MAX_ATTACHMENTS} 张图片")
+                for path in paths:
+                    self._queue_image(self.core.assets.import_file(path, source_kind="clipboard")["id"])
+            else:
+                return None
+            self._assets_changed()
+            return "break"
+        except (AssetError, OSError) as error:
+            self._notice(str(error))
+            return "break"
+
+    def _open_library(self):
+        from .media_ui import LibraryWindow
+        if self.library_window is not None and self.library_window.winfo_exists():
+            self.library_window.refresh()
+            self.library_window.lift()
+        else:
+            self.library_window = LibraryWindow(self)
+
+    def _view_image(self, identity):
+        from .media_ui import ImageViewer
+        ImageViewer(self, identity)
+
+    def _assets_changed(self):
+        self.status.configure(text="图片已保存在工作数据目录，可在图库填写说明和用途。")
+        self.core.maintain(backup_now=True)
 
     def _retry(self):
         try:
@@ -621,6 +740,7 @@ class Desktop(tk.Tk):
                 if any(destination.iterdir()):
                     raise ValueError("新的工作目录必须为空。若要使用以前的数据，请用“从恢复包恢复”。")
                 self.core.store.snapshot(destination / "companion.sqlite3")
+                copy_media(destination / "companion.sqlite3", Path(self.settings.data_dir), destination)
             if updated.backup_dir:
                 # Verify write access before changing the persisted configuration.
                 import tempfile
@@ -742,7 +862,7 @@ class Desktop(tk.Tk):
             self.after(60, self._poll)
 
     def _tick(self):
-        composing = bool(self.input.get("1.0", "end-1c").strip())
+        composing = bool(self.input.get("1.0", "end-1c").strip() or self.pending_images)
         if not self.core.maybe_proactive(composing=composing):
             self.core.maintain()
         self.mood_label.configure(text="本鱼现在 · " + self.core.presence.mood()["mood"])

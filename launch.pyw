@@ -38,6 +38,13 @@ def main() -> int:
                     raise RuntimeError("请安装 Python 3.11 或更高版本，并保留 Tcl/Tk 支持。")
                 from whale_friend.__main__ import main as run
                 return run()
+            except ModuleNotFoundError as error:
+                traceback.print_exc()
+                if error.name == "PIL":
+                    report_error("图片功能需要 Pillow。请在仓库目录运行：\n\npython -m venv .venv\n.venv\\Scripts\\python.exe -m pip install -r requirements.txt\n\n然后重新双击 start.bat。")
+                else:
+                    report_error(f"缺少运行模块，请检查安装。\n\n详细错误已保存在：\n{log_path}")
+                return 1
             except Exception:
                 traceback.print_exc()
                 report_error(f"请检查 Python 的 Tkinter 支持、.env 和数据目录权限。\n\n详细错误已保存在：\n{log_path}")
