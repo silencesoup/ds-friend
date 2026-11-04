@@ -62,7 +62,7 @@ class Backups:
                 for table in ("sessions", "memories", "summaries"):
                     files[f"exports/{table}.json"] = json.dumps([dict(row) for row in db.execute(f"SELECT * FROM {table}")], ensure_ascii=False, indent=2).encode("utf-8")
                 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                for table in ("media_assets", "message_assets"):
+                for table in ("media_assets", "message_assets", "memory_actions", "memory_annotations", "memory_topics", "memory_topic_links", "memory_focus", "memory_activations", "memory_versions", "message_animations", "memory_signals", "memory_topic_cues", "memory_changes", "memory_recall_traces"):
                     if table in tables:
                         files[f"exports/{table}.json"] = json.dumps([dict(row) for row in db.execute(f"SELECT * FROM {table}")], ensure_ascii=False, indent=2).encode("utf-8")
                 for asset in media_records(db):

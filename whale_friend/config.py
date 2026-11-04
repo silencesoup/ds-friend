@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL = ROOT / ".local"
@@ -34,13 +35,75 @@ def read_env(path: Path = ROOT / ".env") -> dict[str, str]:
             key, value = line.removeprefix("export ").split("=", 1)
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                value = value[1:-1]
+                if value[0] == '"':
+                    try:
+                        value = json.loads(value)
+                    except json.JSONDecodeError:
+                        value = value[1:-1]
+                else:
+                    value = value[1:-1]
             result[key.strip()] = value
-    # Only explicit application variables override the file; never expose them to UI/logs.
+    # Only explicit application variables override the file; never log credentials.
     for key in ("ds_base_url", "base_url", "api_key", "ds_model", "DS_BASE_URL", "DS_API_KEY", "DS_MODEL"):
         if key in os.environ:
             result[key] = os.environ[key]
     return result
+
+
+@dataclass
+class ConnectionConfig:
+    """Connection form values live in .env, never in settings or memory backups."""
+    base_url: str = ""
+    api_key: str = field(default="", repr=False)
+    model: str = ""
+
+    @classmethod
+    def load(cls, env: dict | None = None, legacy_model: str = "") -> ConnectionConfig:
+        env = read_env() if env is None else env
+        return cls(env.get("DS_BASE_URL") or env.get("ds_base_url") or env.get("base_url") or "",
+                   env.get("DS_API_KEY") or env.get("api_key") or "",
+                   legacy_model or env.get("DS_MODEL") or env.get("ds_model") or "")
+
+    def validate(self) -> None:
+        self.base_url, self.api_key, self.model = self.base_url.strip(), self.api_key.strip(), self.model.strip()
+        if any(ord(char) < 32 or ord(char) == 127 for value in (self.base_url, self.api_key, self.model) for char in value):
+            raise ValueError("API 地址、密钥和模型名称不能包含换行或控制字符")
+        try:
+            parsed = urlparse(self.base_url)
+            valid = parsed.scheme in ("http", "https") and parsed.hostname and not parsed.username and not parsed.password
+            parsed.port  # Validate malformed and out-of-range ports without exposing the URL.
+        except ValueError:
+            valid = False
+        if not valid or any(char.isspace() for char in self.base_url) or parsed.query or parsed.fragment:
+            raise ValueError("请在设置中填写有效的 API 地址（http:// 或 https://，不要包含登录凭据、查询参数或片段）")
+
+    def as_env(self) -> dict[str, str]:
+        return {"ds_base_url": self.base_url, "api_key": self.api_key, "ds_model": self.model}
+
+    def save(self, path: Path = ROOT / ".env") -> None:
+        self.validate()
+        # Update existing aliases as well, so a stale uppercase/file alias cannot win.
+        groups = {"ds_base_url": ("ds_base_url", "base_url", "DS_BASE_URL"),
+                  "api_key": ("api_key", "DS_API_KEY"), "ds_model": ("ds_model", "DS_MODEL")}
+        values = {alias: self.as_env()[canonical] for canonical, aliases in groups.items() for alias in aliases}
+        # Explicit process environment values retain their documented precedence.
+        conflicts = [key for key, value in values.items() if key in os.environ and os.environ[key] != value]
+        if conflicts:
+            raise ValueError("启动环境变量优先于 .env，请先修改或移除这些变量，再保存：" + "、".join(conflicts))
+        lines = path.read_text(encoding="utf-8-sig").splitlines() if path.exists() else []
+        found = set()
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("#") or "=" not in stripped:
+                continue
+            key = stripped.removeprefix("export ").split("=", 1)[0].strip()
+            if key in values:
+                lines[index] = key + "=" + json.dumps(values[key], ensure_ascii=False)
+                found.add(key)
+        for canonical, aliases in groups.items():
+            if not found.intersection(aliases):
+                lines.append(canonical + "=" + json.dumps(values[canonical], ensure_ascii=False))
+        atomic_write(path, "\n".join(lines) + "\n")
 
 
 @dataclass
@@ -65,8 +128,42 @@ class Settings:
     quiet_start_hour: int = 22
     quiet_end_hour: int = 8
     adaptive_enabled: bool = True
+    mobile_enabled: bool = False
+    mobile_port: int = 8765
+    memory_tools_enabled: bool = True
+    memory_consolidation_enabled: bool = True
+    memory_evolution_enabled: bool = True
+    vision_mode: str = "auto"
+    pet_enabled: bool = False
+    pet_plugin_dir: str = ""
+    pet_electron_path: str = ""
+    pet_size: int = 462
+    pet_fixed: bool = False
+    pet_voice_enabled: bool = False
+    pet_voice_name: str = "zh-CN-XiaoyiNeural"
+    animation_enabled: bool = True
 
     def validate(self) -> None:
+        if type(self.memory_evolution_enabled) is not bool:
+            raise ValueError('明确状态变化自动更新开关必须为布尔值')
+        if type(self.animation_enabled) is not bool:
+            raise ValueError("角色动画开关必须为布尔值")
+        if type(self.pet_voice_enabled) is not bool or self.pet_voice_name not in ('zh-CN-XiaoyiNeural','zh-CN-XiaoxiaoNeural','zh-CN-YunxiNeural','zh-CN-YunjianNeural'):
+            raise ValueError("桌宠朗读开关或音色不正确")
+        if type(self.pet_enabled) is not bool or type(self.pet_fixed) is not bool:
+            raise ValueError("桌宠开关必须为布尔值")
+        if type(self.pet_size) is not int or not 240 <= self.pet_size <= 900:
+            raise ValueError("桌宠尺寸应为 240–900")
+        if not isinstance(self.pet_plugin_dir, str) or not isinstance(self.pet_electron_path, str):
+            raise ValueError("桌宠路径格式不正确")
+        if self.vision_mode not in ("auto", "on", "off"):
+            raise ValueError("识图模式应为 auto、on 或 off")
+        if type(self.memory_tools_enabled) is not bool:
+            raise ValueError("对话记忆工具开关必须为布尔值")
+        if type(self.memory_consolidation_enabled) is not bool:
+            raise ValueError("后台记忆归纳开关必须为布尔值")
+        if type(self.mobile_enabled) is not bool or type(self.mobile_port) is not int or not 1024 <= self.mobile_port <= 65535:
+            raise ValueError("手机连接开关须为布尔值，端口应在 1024 到 65535 之间")
         if not self.character_name.strip() or not self.user_name.strip():
             raise ValueError("角色名字和用户称呼不能为空")
         if not 4096 <= self.context_tokens <= 1_000_000:

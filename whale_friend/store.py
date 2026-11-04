@@ -69,6 +69,102 @@ CREATE TABLE IF NOT EXISTS message_assets (
     PRIMARY KEY(message_id,asset_id)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS client_requests (
+    request_id TEXT PRIMARY KEY, request_hash TEXT NOT NULL,
+    message_id INTEGER NOT NULL REFERENCES messages(id)
+);
+CREATE TABLE IF NOT EXISTS memory_actions (
+    user_message_id INTEGER PRIMARY KEY REFERENCES messages(id),
+    status TEXT NOT NULL, operation TEXT NOT NULL DEFAULT '',
+    memory_id INTEGER REFERENCES memories(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_annotations (
+    memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+    pinned INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
+    topics_override TEXT, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_topics (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL, aliases TEXT NOT NULL DEFAULT '[]',
+    summary TEXT NOT NULL DEFAULT '', source_ids TEXT NOT NULL DEFAULT '[]',
+    fingerprint TEXT NOT NULL DEFAULT '', dirty INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_topic_links (
+    topic_id TEXT NOT NULL REFERENCES memory_topics(id) ON DELETE CASCADE,
+    memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    PRIMARY KEY(topic_id,memory_id)
+);
+CREATE INDEX IF NOT EXISTS memory_links_source ON memory_topic_links(memory_id);
+CREATE TABLE IF NOT EXISTS memory_focus (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id), topic_ids TEXT NOT NULL,
+    user_message_id INTEGER NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_activations (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id), core_ids TEXT NOT NULL,
+    topic_ids TEXT NOT NULL, memory_ids TEXT NOT NULL, user_message_id INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL, content TEXT NOT NULL, source_ids TEXT NOT NULL,
+    valid_from TEXT NOT NULL, valid_to TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_signals (
+    memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+    importance INTEGER NOT NULL DEFAULT 1, reason TEXT NOT NULL DEFAULT '',
+    cues TEXT NOT NULL DEFAULT '[]', manual INTEGER NOT NULL DEFAULT 0,
+    fingerprint TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_topic_cues (
+    topic_id TEXT PRIMARY KEY REFERENCES memory_topics(id) ON DELETE CASCADE,
+    cues TEXT NOT NULL DEFAULT '[]', fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    previous_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    newer_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    previous_fingerprint TEXT NOT NULL, newer_fingerprint TEXT NOT NULL,
+    evidence_ids TEXT NOT NULL, explanation TEXT NOT NULL, status TEXT NOT NULL,
+    created_at TEXT NOT NULL, reviewed_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(previous_id,newer_id)
+);
+CREATE TABLE IF NOT EXISTS memory_recall_traces (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    user_message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL, requested_ids TEXT NOT NULL, topic_ids TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS memory_signal_source_update AFTER UPDATE ON memories
+WHEN OLD.kind<>NEW.kind OR OLD.content<>NEW.content OR OLD.source_ids<>NEW.source_ids BEGIN
+    DELETE FROM memory_recall_traces;
+    DELETE FROM memory_topic_cues WHERE topic_id IN (SELECT topic_id FROM memory_topic_links WHERE memory_id=OLD.id);
+END;
+CREATE TRIGGER IF NOT EXISTS memory_signal_source_delete BEFORE DELETE ON memories BEGIN
+    DELETE FROM memory_recall_traces;
+    DELETE FROM memory_topic_cues WHERE topic_id IN (SELECT topic_id FROM memory_topic_links WHERE memory_id=OLD.id);
+END;
+CREATE TRIGGER IF NOT EXISTS memory_hub_insert AFTER INSERT ON memories BEGIN
+    INSERT INTO meta VALUES ('memory_hub_dirty','1') ON CONFLICT(key) DO UPDATE SET value='1';
+END;
+CREATE TRIGGER IF NOT EXISTS memory_hub_update AFTER UPDATE ON memories BEGIN
+    UPDATE memory_topics SET summary='',source_ids='[]',dirty=1
+        WHERE id IN (SELECT topic_id FROM memory_topic_links WHERE memory_id=OLD.id);
+    DELETE FROM memory_activations;
+    INSERT INTO meta VALUES ('memory_hub_dirty','1') ON CONFLICT(key) DO UPDATE SET value='1';
+END;
+CREATE TRIGGER IF NOT EXISTS memory_hub_delete BEFORE DELETE ON memories BEGIN
+    UPDATE memory_topics SET summary='',source_ids='[]',dirty=1
+        WHERE id IN (SELECT topic_id FROM memory_topic_links WHERE memory_id=OLD.id);
+    DELETE FROM memory_activations;
+    INSERT INTO meta VALUES ('memory_hub_dirty','1') ON CONFLICT(key) DO UPDATE SET value='1';
+END;
+CREATE TRIGGER IF NOT EXISTS memory_hub_version BEFORE UPDATE ON memories
+WHEN OLD.kind<>NEW.kind OR OLD.content<>NEW.content BEGIN
+    INSERT INTO memory_versions(memory_id,kind,content,source_ids,valid_from,valid_to)
+        VALUES (OLD.id,OLD.kind,OLD.content,OLD.source_ids,OLD.updated_at,NEW.updated_at);
+END;
 PRAGMA user_version=1;
 """
 
@@ -88,6 +184,16 @@ class Store:
         if version > 1:
             self.db.close()
             raise ValueError("数据来自较新版本，请升级应用后打开")
+        tables = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "memories" in tables and "memory_topics" not in tables:
+            # An online snapshot protects the original IDs, sources and dialogue on upgrade.
+            folder = self.directory / "migrations"
+            folder.mkdir(exist_ok=True)
+            self.snapshot(folder / ("before-memory-hub-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f") + ".sqlite3"))
+        elif 'memories' in tables and 'memory_signals' not in tables:
+            folder=self.directory/'migrations'
+            folder.mkdir(exist_ok=True)
+            self.snapshot(folder/('before-memory-signals-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f')+'.sqlite3'))
         self.db.executescript(SCHEMA)
         with self.db:
             self.db.execute("UPDATE messages SET status='interrupted' WHERE status='pending'")
@@ -116,11 +222,13 @@ class Store:
     def sessions(self) -> list[dict]:
         return self.rows("SELECT s.*, MAX(m.id) AS latest FROM sessions s LEFT JOIN messages m ON m.session_id=s.id GROUP BY s.id ORDER BY COALESCE(MAX(m.id),0) DESC,s.created_at DESC")
 
-    def add_message(self, session: str, role: str, content: str, status="complete", timestamp=None, attachments=None) -> int:
+    def add_message(self, session: str, role: str, content: str, status="complete", timestamp=None, attachments=None, request_id=None, request_hash="") -> int:
         stamp = timestamp or now()
         with self.lock, self.db:
             cursor = self.db.execute("INSERT INTO messages(session_id,role,content,status,created_at,day) VALUES (?,?,?,?,?,?)", (session, role, content, status, stamp, stamp[:10]))
             self._attach(cursor.lastrowid, attachments or [])
+            if request_id:
+                self.db.execute("INSERT INTO client_requests VALUES (?,?,?)", (request_id, request_hash, cursor.lastrowid))
             return cursor.lastrowid
 
     def _attach(self, message_id: int, identities: list[int]) -> None:
@@ -150,6 +258,11 @@ class Store:
                     attachment.update(json.loads(attachment.pop("metadata")))
                     attachment["tags"] = json.loads(attachment["tags"])
                     lookup[attachment.pop("message_id")]["attachments"].append(attachment)
+                actions = self.rows("SELECT user_message_id,status,operation,memory_id FROM memory_actions WHERE user_message_id IN (" + ",".join("?" for _ in batch) + ")", batch)
+                for action in actions:
+                    if action["status"] in ("saved", "already") and action["memory_id"] is None:
+                        action["status"] = "removed"
+                    lookup[action.pop("user_message_id")]["memory_action"] = action
         return messages
 
     def finish_message(self, identity: int, content: str, status="complete", attachments=None) -> None:
@@ -219,12 +332,22 @@ class Store:
         if not content:
             return None
         with self.lock:
-            if self.rows("SELECT id FROM memories WHERE content=?", (content,)):
+            if self.rows("SELECT m.id FROM memories m LEFT JOIN memory_annotations a ON a.memory_id=m.id WHERE m.content=? AND COALESCE(a.active,1)=1", (content,)):
                 return None
             blocked = {row["message_id"] for row in self.rows("SELECT message_id FROM forgotten_sources")}
             if sources and blocked.intersection(sources):
                 return None
+            if sources and set(sources).issubset(self.historical_sources()):
+                return None
             return self.execute("INSERT INTO memories(kind,content,source_ids,created_at,updated_at) VALUES (?,?,?,?,?)", (kind, content, json.dumps(sources or []), now(), now()))
+
+    def historical_sources(self):
+        """Do not extract superseded/undone source statements as new current facts."""
+        rows=self.rows('''SELECT m.source_ids FROM memory_changes c JOIN memories m
+            ON m.id=CASE c.status WHEN 'applied' THEN c.previous_id ELSE c.newer_id END
+            JOIN memory_annotations a ON a.memory_id=m.id
+            WHERE c.status IN ('applied','undone') AND a.active=0''')
+        return {key for row in rows for key in json.loads(row['source_ids'])}
 
     def update_memory(self, identity: int, kind: str, content: str) -> None:
         if not content.strip():
@@ -263,6 +386,7 @@ class Store:
                             self.db.execute("UPDATE messages SET content='[此消息已按用户要求删除]',status='erased' WHERE id=?", (item["id"],))
                             self.db.execute("UPDATE media_assets SET allow_reuse=0 WHERE id IN (SELECT asset_id FROM message_assets WHERE message_id=?)", (item["id"],))
                             self.db.execute("DELETE FROM message_assets WHERE message_id=?", (item["id"],))
+                            self.db.execute("DELETE FROM memory_actions WHERE user_message_id=?", (item["id"],))
             self.db.execute("DELETE FROM memories WHERE id=?", (identity,))
             if erase_sources and ids:
                 # Other derived memories can quote the same source exchange.
@@ -283,9 +407,10 @@ class Store:
             for source in sources:
                 self.db.execute("INSERT INTO journal_sources VALUES (?,?)", (source, identity))
             blocked = {r["message_id"] for r in self.rows("SELECT message_id FROM forgotten_sources")}
+            historical=self.historical_sources()
             for fact in facts:
                 content = fact["content"].strip()
-                if content and not blocked.intersection(fact["source_ids"]) and not self.db.execute("SELECT id FROM memories WHERE content=?", (content,)).fetchone():
+                if content and not blocked.intersection(fact["source_ids"]) and not (fact['source_ids'] and set(fact['source_ids']).issubset(historical)) and not self.db.execute("SELECT m.id FROM memories m LEFT JOIN memory_annotations a ON a.memory_id=m.id WHERE m.content=? AND COALESCE(a.active,1)=1", (content,)).fetchone():
                     self.db.execute("INSERT INTO memories(kind,content,source_ids,created_at,updated_at) VALUES (?,?,?,?,?)", (fact["kind"], content, json.dumps(fact["source_ids"]), now(), now()))
             return identity
 

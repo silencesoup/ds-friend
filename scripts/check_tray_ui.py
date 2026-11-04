@@ -25,6 +25,8 @@ class DemoModel:
             yield "本鱼的新来信到啦～这是隔离的托盘验证消息，打开小屋查看后，闪烁就会停止。"
 
     def complete(self, messages, **kwargs):
+        if "即时记忆执行器" in messages[0]["content"]:
+            return '{"action":"none","reason":"not_requested"}'
         return '{"title":"托盘验证","summary":"独立的通知测试，不属于用户日常对话。","facts":[]}'
 
 

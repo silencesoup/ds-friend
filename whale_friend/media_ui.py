@@ -38,7 +38,7 @@ class ImageViewer(tk.Toplevel):
                 raise AssetError("图片像素过大，无法预览")
             self.label = tk.Label(self, bg=WHITE)
             self.label.pack(padx=15, pady=15)
-            note = asset["description"] or "未填写说明；当前模型未对图片进行视觉解析。"
+            note = asset["description"] or "未填写说明。支持视觉的模型可直接理解聊天中发送的图片。"
             tk.Label(self, text=note, fg=INK, bg=WHITE, wraplength=700, justify="left").pack(padx=15, pady=(0, 15))
             self.frame = 0
             self.frames = min(getattr(self.image, "n_frames", 1), 500)
@@ -114,7 +114,7 @@ class LibraryWindow(tk.Toplevel):
         self.details.pack(fill="x", pady=(6, 10))
         tk.Label(right, text="名字", bg=WHITE, fg=INK).pack(anchor="w")
         tk.Entry(right, textvariable=self.name, bg=PALE, relief="flat", borderwidth=7).pack(fill="x", pady=(4, 10))
-        tk.Label(right, text="说明（由你填写，文本模型不会看图）", bg=WHITE, fg=INK).pack(anchor="w")
+        tk.Label(right, text="说明（可选；表情复用时用于判断用途）", bg=WHITE, fg=INK).pack(anchor="w")
         self.description = tk.Text(right, bg=PALE, fg=INK, height=4, wrap="word", bd=0, padx=10, pady=8)
         self.description.pack(fill="x", pady=(4, 10))
         tk.Label(right, text="用途标签（用逗号分隔，如：开心、点头、撒娇）", bg=WHITE, fg=INK).pack(anchor="w")

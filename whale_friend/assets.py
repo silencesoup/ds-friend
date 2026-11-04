@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import io
 import json
 import re
@@ -84,12 +85,19 @@ def copy_media(database: Path, source: Path, destination: Path) -> None:
             atomic_write(target, content)
 
 
-def message_text(message: dict) -> str:
+def message_text(message: dict, visual_ids=None) -> str:
     text = message["content"]
+    action = message.get("memory_action")
+    if action and action["status"] in ("saved", "already", "removed"):
+        text += f"\n[应用记忆回执：{action['status']}；记忆编号：{action.get('memory_id')}。这是历史执行状态，不能当作本轮已保存的依据。]"
     for asset in message.get("attachments", []):
+        if visual_ids and asset['id'] in visual_ids:
+            caption = ("；收藏说明：" + asset['description'][:160]) if asset.get('description') else ""
+            text += f"\n[附图#{asset['id']} {asset['title'][:60]}；实际图像，已缩放为静态首帧{caption}。]"
+            continue
         description = asset.get("description") or "未提供图片内容说明"
         tags = "、".join(asset.get("tags", [])) or "无"
-        text += f"\n[附图#{asset['id']} {asset['title']}；说明：{description}；标签：{tags}。以上为收藏说明，图片未进行视觉解析。]"
+        text += f"\n[附图#{asset['id']} {asset['title']}；说明：{description}；标签：{tags}。本次仅传收藏说明，图片未进行视觉解析。]"
     return text
 
 
@@ -201,7 +209,7 @@ class AssetLibrary:
         if not title.strip():
             raise AssetError("请给图片起一个名字")
         if allow_reuse and not (description.strip() or tags):
-            raise AssetError("先填写描述或用途标签，再允许本鱼使用；当前模型不能直接看图")
+            raise AssetError("先填写描述或用途标签，再允许本鱼选作表情包使用")
         self.store.execute("UPDATE media_assets SET title=?,description=?,tags=?,allow_reuse=?,updated_at=? WHERE id=?", (title.strip()[:80], description.strip()[:500], json.dumps(tags, ensure_ascii=False), int(bool(allow_reuse)), now(), identity))
 
     def archive(self, identity: int, archived=True):
@@ -256,3 +264,15 @@ class AssetLibrary:
                 return preview.copy()
         except (OSError, Image.DecompressionBombError, Image.DecompressionBombWarning):
             raise AssetError("暂时无法显示这张图片，可检查图片文件或恢复备份") from None
+
+    def vision_url(self, identity: int) -> str:
+        """Prepare a bounded, orientation-correct inference copy; retain the original."""
+        preview = self.thumbnail(identity, size=(1280, 1280))
+        try:
+            background = Image.new("RGB", preview.size, "white")
+            background.paste(preview, mask=preview.getchannel("A"))
+            buffer = io.BytesIO()
+            background.save(buffer, format="JPEG", quality=90)
+            return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+        finally:
+            preview.close()

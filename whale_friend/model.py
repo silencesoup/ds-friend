@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import base64
+import io
+import secrets
 import socket
 import threading
 import urllib.error
@@ -8,7 +11,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 
-from .config import Settings, read_env
+from .config import ConnectionConfig, Settings
 
 
 class ModelError(RuntimeError):
@@ -54,22 +57,34 @@ class ThinkFilter:
 class ModelClient:
     def __init__(self, settings: Settings, env: dict | None = None):
         self.settings = settings
-        env = read_env() if env is None else env
-        self.base = (env.get("DS_BASE_URL") or env.get("ds_base_url") or env.get("base_url") or "").rstrip("/")
+        connection = ConnectionConfig.load(env, legacy_model=settings.model)
+        self.base = connection.base_url.strip().rstrip("/")
         for suffix in ("/chat/completions", "/models"):
             if self.base.endswith(suffix):
                 self.base = self.base[:-len(suffix)]
-        self.key = env.get("DS_API_KEY") or env.get("api_key") or ""
-        self.model = settings.model or env.get("DS_MODEL") or env.get("ds_model") or ""
+        self.key = connection.api_key.strip()
+        self.model = connection.model.strip()
         self.discovery_lock = threading.Lock()
         self.response_lock = threading.Lock()
         self.active_response = None
-        parsed = urllib.parse.urlparse(self.base)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
-            raise ModelError("请在 .env 中设置有效的 ds_base_url（http:// 或 https://，凭据放在 api_key 中）")
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if parsed.hostname in ("localhost", "127.0.0.1", "::1") else urllib.request.build_opener()
+        self.vision_available = settings.vision_mode == "on"
+        self.vision_checked = settings.vision_mode in ("on", "off")
+        self.vision_status = "已手动开启识图" if self.vision_available else "尚未检测视觉输入" if settings.vision_mode == "auto" else "已关闭识图，仅发送图片说明"
+        # Keep the desktop accessible even when configuration is missing or invalid.
+        try:
+            hostname = urllib.parse.urlparse(self.base).hostname
+        except ValueError:
+            hostname = None
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if hostname in ("localhost", "127.0.0.1", "::1") else urllib.request.build_opener()
+
+    def _validate_connection(self):
+        try:
+            ConnectionConfig(self.base, self.key, self.model).validate()
+        except ValueError as error:
+            raise ModelError(str(error)) from None
 
     def _open(self, endpoint: str, payload=None, timeout=None):
+        self._validate_connection()
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         if self.key:
             headers["Authorization"] = "Bearer " + self.key
@@ -87,6 +102,7 @@ class ModelClient:
 
     def discover(self) -> str:
         with self.discovery_lock:
+            self._validate_connection()
             if self.model:
                 return self.model
             original = self.base
@@ -104,6 +120,56 @@ class ModelClient:
                     continue
             self.base = original
             raise ModelError("未能自动获取模型名称。请在设置中填写服务使用的模型名，或在 .env 中配置 ds_model。")
+
+    def check_connection(self) -> str:
+        """Check endpoint, credentials and model without requiring a finished answer."""
+        payload = {"model": self.discover(), "messages": [{"role": "user", "content": "你好"}], "stream": False, "max_tokens": 1}
+        try:
+            with self._open("/chat/completions", payload) as response:
+                data = json.load(response)
+            choices = data.get("choices") if isinstance(data, dict) else None
+            if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict) or not isinstance(choices[0].get("message"), dict):
+                raise ValueError
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            raise ModelError("服务可以访问，但返回格式不兼容聊天接口，请检查 API 地址和模型名称。") from None
+        except (TimeoutError, OSError):
+            raise ModelError("连接测试中断或超时，请检查服务状态与超时设置。") from None
+        return self.model
+
+    def ensure_vision(self, cancel=None, force=False) -> bool:
+        """Verify pixels reach the configured model, even behind a text-only gateway."""
+        if cancel and cancel.is_set():
+            raise Cancelled("已停止生成")
+        if not force and self.vision_checked:
+            return self.vision_available
+        from PIL import Image
+        palette = {"red":(255,0,0), "blue":(0,0,255), "green":(0,180,0), "yellow":(255,255,0), "purple":(160,0,200)}
+        left, right = secrets.SystemRandom().sample(list(palette), 2)
+        picture = Image.new("RGB", (160, 80), palette[left])
+        picture.paste(palette[right], (80,0,160,80))
+        buffer = io.BytesIO()
+        picture.save(buffer, format="PNG")
+        picture.close()
+        url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+        prompt = '这是一张左右各一个纯色色块的测试图片。直接观察图片，返回JSON：{"left":"颜色英文名","right":"颜色英文名"}。颜色只从 red,blue,green,yellow,purple 选择；不要解释，不要猜没有看到的图。'
+        try:
+            answer = self.complete([{"role":"user", "content":[{"type":"text", "text":prompt}, {"type":"image_url", "image_url":{"url":url}}]}], max_tokens=512, cancel=cancel)
+            try:
+                data = json.loads(answer[answer.index("{"):answer.rindex("}") + 1])
+                available = data.get("left", "").lower().strip() == left and data.get("right", "").lower().strip() == right
+            except (ValueError, TypeError, AttributeError):
+                available = False
+        except Cancelled:
+            raise
+        except ModelError as error:
+            if not any(code in str(error) for code in ("HTTP 400", "HTTP 404", "HTTP 422")):
+                raise
+            available = False
+        if cancel and cancel.is_set():
+            raise Cancelled("已停止生成")
+        self.vision_available, self.vision_checked = available, True
+        self.vision_status = "视觉测试通过，可以直接识图" if available else "视觉测试未通过：当前接口可能不支持或未正确转发图片；本轮仅发送说明，可在设置中重新测试或手动开启"
+        return available
 
     def stream(self, messages: list[dict], cancel: threading.Event, max_tokens=None, temperature=0.75) -> Iterator[str]:
         if cancel.is_set():

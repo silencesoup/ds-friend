@@ -24,6 +24,8 @@ class DemoModel:
             yield f"Deep！Deep！本鱼把这张表情收藏好啦～这是隔离测试。[[sticker:{self.sticker}]]"
 
     def complete(self, messages, **kwargs):
+        if "即时记忆执行器" in messages[0]["content"]:
+            return '{"action":"none","reason":"not_requested"}'
         return '{"title":"图片验证","summary":"隔离的图片附件验证。","facts":[]}'
 
 

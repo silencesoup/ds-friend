@@ -13,10 +13,11 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageGrab, ImageTk
 
 from .backup import Backups
-from .config import LOCAL, ROOT, Settings
+from .config import ConnectionConfig, LOCAL, ROOT, Settings
 from .service import Companion
 from .tray import UnreadMessages, WindowsTray
 from .assets import AssetError, MAX_ATTACHMENTS, MAX_IMAGE_PIXELS, copy_media
+from .memory_actions import KINDS, receipt_label
 
 NAVY = "#132D4B"
 BLUE = "#327CEC"
@@ -73,6 +74,12 @@ class Desktop(tk.Tk):
         self.pending_images = []
         self.chat_images = []
         self.library_window = None
+        self.mobile_server = None
+        self.memory_hub_window = None
+        self.pet_runtime = None
+        self.pet_update_busy = False
+        self.pet_release = None
+        self.pet_update_trial = False
         self.base_title = f"{settings.character_name} · 鲸鱼娘的海边小屋"
         self.title(self.base_title)
         self.geometry("1260x850")
@@ -90,17 +97,22 @@ class Desktop(tk.Tk):
         self._render_chat()
         self._switch("chat")
         self._setup_background_window()
+        self._start_mobile()
         self.bind("<FocusIn>", self._on_focus, add="+")
         self.after(80, self._poll)
         self.after(1500, self._tick)
         self.core.connect()
         self.core.maintain()
+        if self.settings.pet_enabled:
+            self.after(400, self._start_pet)
 
     def _setup_background_window(self):
         menu = tk.Menu(self)
         house = tk.Menu(menu, tearoff=False)
         house.add_command(label="显示小屋", command=self._show_window)
         house.add_command(label="图片与表情包", command=self._open_library)
+        house.add_command(label="显示桌宠", command=self._start_pet)
+        house.add_command(label="隐藏桌宠", command=self._stop_pet)
         house.add_command(label="隐藏到托盘" if sys.platform == "win32" else "最小化到 Dock", command=self._close)
         house.add_separator()
         house.add_command(label="退出小屋", command=self._exit_app)
@@ -115,11 +127,13 @@ class Desktop(tk.Tk):
                 self.status.configure(text="系统托盘暂不可用，点关闭将最小化；可从“小屋”菜单退出。")
 
     def _reading(self, session):
-        if self.hidden_to_tray or self.state() != "normal" or self.page != "chat" or self.session != session:
+        # Use actual visibility, including maximized windows and restores outside the tray.
+        if self.state() not in ("normal", "zoomed") or not self.winfo_viewable() or self.page != "chat" or self.session != session:
             return False
         if self.tray:
             return self.tray.foreground(self.winfo_id())
-        return self.focus_displayof() is not None
+        focused = self.focus_displayof()
+        return focused is not None and focused.winfo_toplevel() == self
 
     def _update_unread(self):
         count = self.unread.count
@@ -133,7 +147,7 @@ class Desktop(tk.Tk):
         self._update_unread()
 
     def _on_focus(self, event=None):
-        if not self.exiting and self._reading(self.session) and self.session in self.unread.sessions:
+        if not self.exiting and self.session in self.unread.sessions and self._reading(self.session):
             self.unread.read(self.session)
             self._update_unread()
 
@@ -174,20 +188,29 @@ class Desktop(tk.Tk):
         self.sessions_list = tk.Listbox(self.sidebar, bg=NAVY, fg="#C5D5E7", selectbackground="#2B507B", selectforeground=WHITE, bd=0, highlightthickness=0, activestyle="none", exportselection=False, height=7)
         self.sessions_list.pack(fill="both", expand=True, padx=20, pady=12)
         self.sessions_list.bind("<<ListboxSelect>>", self._select_session)
-        portrait = tk.Frame(self.sidebar, bg="#EAF2FF")
-        portrait.pack(side="bottom", fill="x", padx=16, pady=(0, 18), before=self.sessions_list)
-        art_path = ROOT / "assets" / "character-reference.png"
-        if art_path.exists():
-            self.reference = tk.PhotoImage(file=str(art_path))
-            # Clip the first view in a canvas; the supplied reference stays unmodified.
-            self.portrait = tk.PhotoImage()
-            self.portrait.tk.call(self.portrait, "copy", self.reference, "-from", 0, 0, 540, 621, "-subsample", 3, 3)
-            canvas = tk.Canvas(portrait, width=202, height=220, bg=WHITE, bd=0, highlightthickness=0)
-            canvas.pack(fill="x")
-            canvas.create_image(11, 5, image=self.portrait, anchor="nw")
-        self.mood_label = label(portrait, "本鱼现在 · 平静", 9, "#4D6E98", "#EAF2FF")
+        sidebar_pet = sys.platform == 'win32'
+        portrait_bg = NAVY if sidebar_pet else '#EAF2FF'
+        portrait_fg = '#A9BED6' if sidebar_pet else '#4D6E98'
+        portrait = tk.Frame(self.sidebar, bg=portrait_bg)
+        portrait.pack(side="bottom", fill="x", padx=0 if sidebar_pet else 16, pady=(0, 12 if sidebar_pet else 18), before=self.sessions_list)
+        if sidebar_pet:
+            from .avatar_ui import AvatarPanel
+            self.sidebar_avatar = AvatarPanel(portrait,self.core.animations,lambda:self.session,height=290,
+                                              bg=NAVY,foreground=portrait_fg,show_caption=False,trim=True)
+            self.sidebar_avatar.pack(fill='x')
+        else:
+            art_path = ROOT / "assets" / "character-reference.png"
+            if art_path.exists():
+                self.reference = tk.PhotoImage(file=str(art_path))
+                # Clip the first view; the supplied reference stays unmodified.
+                self.portrait = tk.PhotoImage()
+                self.portrait.tk.call(self.portrait, "copy", self.reference, "-from", 0, 0, 540, 621, "-subsample", 8, 8)
+                canvas = tk.Canvas(portrait, width=202, height=82, bg=WHITE, bd=0, highlightthickness=0)
+                canvas.pack(fill="x")
+                canvas.create_image(67, 2, image=self.portrait, anchor="nw")
+        self.mood_label = label(portrait, "本鱼现在 · 平静", 9, portrait_fg, portrait_bg)
         self.mood_label.pack(pady=(8, 0))
-        label(portrait, "本鱼在这里，慢慢说就好。", 9, "#4D6E98", "#EAF2FF").pack(pady=(3, 8))
+        label(portrait, "本鱼在这里，慢慢说就好。", 9, portrait_fg, portrait_bg).pack(pady=(3, 8))
         self.content = tk.Frame(self, bg=PALE)
         self.content.pack(side="left", fill="both", expand=True)
         header = tk.Frame(self.content, bg=PALE)
@@ -216,6 +239,10 @@ class Desktop(tk.Tk):
         self.backup_status.pack(side="right")
 
     def _chat_page(self, parent):
+        if sys.platform != 'win32':
+            from .avatar_ui import AvatarPanel
+            self.avatar_panel = AvatarPanel(parent,self.core.animations,lambda:self.session,height=230)
+            self.avatar_panel.pack(fill='x',padx=32,pady=(0,10))
         panel = tk.Frame(parent, bg=WHITE, highlightbackground=LINE, highlightthickness=1)
         panel.pack(fill="both", expand=True, padx=32)
         self.chat_text = tk.Text(panel, height=1, bg=WHITE, fg=INK, wrap="word", bd=0, padx=25, pady=22, font=(FONT, 11), spacing3=9, cursor="arrow", state="disabled")
@@ -242,6 +269,7 @@ class Desktop(tk.Tk):
         bar.pack(fill="x", padx=16, pady=(0, 12))
         button(bar, "发图片", self._choose_images).pack(side="left", padx=(0, 6))
         button(bar, "图库", self._open_library).pack(side="left", padx=(0, 12))
+        button(bar, "动作图鉴", self._open_animation_library).pack(side="left",padx=(0,8))
         label(bar, "Enter 发送 · Shift+Enter 换行", 9, MUTED).pack(side="left")
         self.send_button = button(bar, "发送来信  ↗", self._send, True)
         self.send_button.pack(side="right")
@@ -265,6 +293,8 @@ class Desktop(tk.Tk):
     def _memory_page(self, parent):
         left, right = self._split_page(parent)
         label(left, "被好好记住的小事", 12, bold=True).pack(anchor="w", pady=(0, 12))
+        button(left, "核心档案与主题卡", self._open_memory_hub).pack(fill="x", pady=(0, 6))
+        button(left, "本轮想起了什么", self._show_memory_activation).pack(fill="x", pady=(0, 8))
         self.memory_list = tk.Listbox(left, bg=WHITE, fg=INK, selectbackground="#E5EFFF", selectforeground=BLUE, bd=0, highlightthickness=0, activestyle="none", exportselection=False)
         self.memory_list.pack(fill="both", expand=True)
         self.memory_list.bind("<<ListboxSelect>>", self._select_memory)
@@ -272,14 +302,26 @@ class Desktop(tk.Tk):
         label(right, "长期记忆", 16, bold=True).pack(anchor="w")
         label(right, "可修正、可删除；自动提取的内容请核对来源。", 9, MUTED, wraplength=430, justify="left").pack(anchor="w", pady=(5, 18))
         self.memory_kind = tk.StringVar(value="事实")
-        kinds = ttk.Combobox(right, textvariable=self.memory_kind, values=("偏好", "称呼", "目标", "事实", "相处偏好"), state="readonly", width=16)
+        kinds = ttk.Combobox(right, textvariable=self.memory_kind, values=KINDS, state="readonly", width=16)
         kinds.pack(anchor="w", pady=(0, 10))
         self.memory_text = tk.Text(right, height=5, bg=PALE, fg=INK, wrap="word", bd=0, padx=12, pady=12, undo=True)
         self.memory_text.pack(fill="x")
+        self.memory_pin = tk.BooleanVar(value=False)
+        self.memory_active = tk.BooleanVar(value=True)
+        tk.Checkbutton(right, text="固定为核心档案（每轮自动带上）", variable=self.memory_pin, bg=WHITE, fg=INK).pack(anchor="w", pady=(8, 0))
+        tk.Checkbutton(right, text="当前有效（取消后保留历史，不自动用于回复）", variable=self.memory_active, bg=WHITE, fg=INK).pack(anchor="w")
+        self.memory_topic = tk.StringVar(value="自动分类")
+        self.memory_topic_box = ttk.Combobox(right, textvariable=self.memory_topic, state="readonly")
+        self.memory_topic_box.pack(fill="x", pady=(6, 0))
+        from .memory_signals import LEVELS
+        self.memory_importance=tk.StringVar(value='自动判断')
+        label(right,'重要程度（你的选择优先于自动判断）',9,MUTED).pack(anchor='w',pady=(6,0))
+        ttk.Combobox(right,textvariable=self.memory_importance,values=('自动判断',)+LEVELS,state='readonly').pack(fill='x',pady=(6,0))
         actions = tk.Frame(right, bg=WHITE)
         actions.pack(fill="x", pady=12)
         button(actions, "保存记忆", self._save_memory, True).pack(side="left")
         button(actions, "删除…", self._forget_memory).pack(side="left", padx=10)
+        button(actions, "修订历史", self._show_memory_versions).pack(side="left")
         label(right, "记忆从哪里来", 11, bold=True).pack(anchor="w", pady=(12, 8))
         self.source_text = tk.Text(right, bg=WHITE, fg=MUTED, wrap="word", height=10, bd=0, state="disabled")
         self.source_text.pack(fill="both", expand=True)
@@ -321,6 +363,91 @@ class Desktop(tk.Tk):
         form.bind("<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
         self.bind_all("<MouseWheel>", lambda event: canvas.yview_scroll(-event.delta if sys.platform == "darwin" else -int(event.delta / 120), "units") if self.page == "settings" else None)
         self.setting_vars = {}
+        label(form, "模型连接", 16, bold=True).pack(anchor="w")
+        label(form, "在这里修改 API 地址、密钥与模型名；保存后写回仓库 .env，并重新连接。", 10, MUTED, wraplength=700, justify="left").pack(anchor="w", pady=(7, 14))
+        self.connection_vars = {key: tk.StringVar() for key in ("base_url", "api_key", "model")}
+        self.show_api_key = tk.BooleanVar(value=False)
+        for key, title in (("base_url", "API 地址 / Base URL"), ("api_key", "API 密钥（本地服务无需密钥时可留空）"), ("model", "模型名称（留空则自动发现）")):
+            label(form, title, 10).pack(anchor="w", pady=(0, 6))
+            row = tk.Frame(form, bg=WHITE)
+            row.pack(fill="x", pady=(0, 13))
+            entry = tk.Entry(row, textvariable=self.connection_vars[key], bg=PALE, fg=INK, relief="flat", borderwidth=8, show="*" if key == "api_key" else "")
+            entry.pack(side="left", fill="x", expand=True)
+            if key == "api_key":
+                self.api_key_entry = entry
+                tk.Checkbutton(row, text="显示", variable=self.show_api_key, command=lambda: self.api_key_entry.configure(show="" if self.show_api_key.get() else "*"), bg=WHITE, fg=INK).pack(side="right", padx=(8, 0))
+        connection_actions = tk.Frame(form, bg=WHITE)
+        connection_actions.pack(fill="x", pady=(0, 8))
+        self.test_connection_button = button(connection_actions, "测试填写的连接", self._test_connection)
+        self.test_connection_button.pack(side="left")
+        self.test_vision_button = button(connection_actions, "测试填写的视觉接口", lambda: self._test_connection(vision=True))
+        self.test_vision_button.pack(side="left", padx=(10, 0))
+        button(connection_actions, "从 .env 重新读取", self._reload_connection).pack(side="left", padx=10)
+        self.connection_detail = label(form, "", 9, MUTED, wraplength=700, justify="left")
+        self.connection_detail.pack(anchor="w", pady=(0, 10))
+        label(form, "测试会发送一条简短请求，不保存为聊天；保存设置后才切换日常聊天。\n密钥只保存在本机 .env，不进入记忆备份。启动环境变量优先于 .env。", 9, MUTED, wraplength=700, justify="left").pack(anchor="w", pady=(0, 14))
+        self._reload_connection(initial=True)
+        label(form, "识图模式", 10, INK).pack(anchor="w", pady=(6, 4))
+        vision_mode = tk.StringVar(value=self.settings.vision_mode)
+        self.setting_vars["vision_mode"] = vision_mode
+        ttk.Combobox(form, textvariable=vision_mode, values=("auto", "on", "off"), state="readonly", width=18).pack(anchor="w")
+        self.vision_detail = label(form, "auto：收到图片时先用测试图检测；on：直接识图；off：仅发送图片说明。\n支持视觉时会把当前和近期附图发送给你填写的模型服务；动图发送静态首帧。", 9, MUTED, wraplength=700, justify="left")
+        self.vision_detail.pack(anchor="w", pady=(5, 12))
+        for variable in self.connection_vars.values():
+            variable.trace_add("write", self._connection_edited)
+        tk.Frame(form, height=1, bg=LINE).pack(fill="x", pady=10)
+        label(form, "桌面上的小肥鱼 · dsh-pet", 16, bold=True).pack(anchor="w", pady=(5, 12))
+        for key, text in (("pet_enabled", "随小屋启动桌宠"), ("pet_fixed", "固定位置，只播放原地动作")):
+            variable = tk.BooleanVar(value=getattr(self.settings, key))
+            self.setting_vars[key] = variable
+            tk.Checkbutton(form, text=text, variable=variable, bg=WHITE, fg=INK).pack(anchor="w", pady=3)
+        self._setting_field(form, "pet_size", "桌宠尺寸（240–900，默认 462）")
+        self._setting_field(form, "pet_plugin_dir", "dsh-pet 插件目录（留空自动寻找本机安装）", browse=True)
+        self._setting_field(form, "pet_electron_path", "Electron 可执行文件（留空自动寻找）")
+        button(form, "选择 Electron 程序", self._choose_pet_electron).pack(anchor="w", pady=(0, 8))
+        pet_actions = tk.Frame(form, bg=WHITE)
+        pet_actions.pack(fill="x", pady=7)
+        button(pet_actions, "启动 / 更新桌宠", self._start_pet).pack(side="left")
+        button(pet_actions, "隐藏桌宠", self._stop_pet).pack(side="left", padx=8)
+        for key, text in (("animation_enabled", "启用角色动画与模型动作选择"), ("pet_voice_enabled", "朗读桌宠回复（Edge 在线语音）")):
+            variable = tk.BooleanVar(value=getattr(self.settings,key))
+            self.setting_vars[key] = variable
+            tk.Checkbutton(form,text=text,variable=variable,bg=WHITE,fg=INK,anchor="w").pack(anchor="w",pady=(5,4))
+        label(form, "音色：晓伊（活泼） / 晓晓（通用） / 云希 / 云健", 9, MUTED).pack(anchor="w")
+        voice = tk.StringVar(value=self.settings.pet_voice_name)
+        self.setting_vars['pet_voice_name'] = voice
+        ttk.Combobox(form,textvariable=voice,values=('zh-CN-XiaoyiNeural','zh-CN-XiaoxiaoNeural','zh-CN-YunxiNeural','zh-CN-YunjianNeural'),state='readonly',width=28).pack(anchor="w",pady=4)
+        button(form,"应用音色并试听",self._preview_pet_voice).pack(anchor="w",pady=4)
+        label(form,"开启后，回复文本会发送到微软 Edge 在线服务合成语音；本地缓存最多 100 条 / 100 MB。\n右键桌宠 → 查看余额，查询当前模型服务；本地模型不支持时会显示说明。",9,MUTED,wraplength=700,justify="left").pack(anchor="w",pady=5)
+        updates = tk.Frame(form,bg=WHITE)
+        updates.pack(fill="x",pady=7)
+        button(updates,"检查插件更新",lambda:self._pet_update('check')).pack(side="left")
+        self.pet_install_button = button(updates,"安装兼容更新",lambda:self._pet_update('install'))
+        self.pet_install_button.pack(side="left",padx=8)
+        self.pet_install_button.configure(state="disabled")
+        button(updates,"回退上一版本",lambda:self._pet_update('rollback')).pack(side="left")
+        self.pet_update_detail = label(form,"更新来自 npm 官方 dsh-pet；当前适配 0.4.x。更新失败保留原版，独立于 DSH 与记忆存储。",9,MUTED,wraplength=700,justify="left")
+        self.pet_update_detail.pack(anchor="w",pady=5)
+        self.pet_detail = label(form, "右键桌宠可对话、选择动作或睡觉；聊天、图片、记忆与小屋共用。\n关闭主窗口到托盘后桌宠仍运行；从“小屋 → 退出小屋”退出时一起关闭。\n动画来自 PC2005-cloud/dsh-pet，本机插件素材按原许可使用。", 9, MUTED, wraplength=700, justify="left")
+        self.pet_detail.pack(anchor="w", pady=(5, 14))
+        tk.Frame(form, height=1, bg=LINE).pack(fill="x", pady=10)
+        label(form, "手机连接 · 同一份记忆", 16, bold=True).pack(anchor="w", pady=(5, 12))
+        mobile_enabled = tk.BooleanVar(value=self.settings.mobile_enabled)
+        self.setting_vars["mobile_enabled"] = mobile_enabled
+        tk.Checkbutton(form, text="允许手机通过同一 Wi-Fi 连接这台电脑", variable=mobile_enabled, bg=WHITE, fg=INK, anchor="w").pack(anchor="w", pady=(0, 10))
+        self._setting_field(form, "mobile_port", "手机连接端口（默认 8765）")
+        self.mobile_detail = label(form, "保存设置后，手机连接地址与配对码会显示在这里。", 9, MUTED, wraplength=700, justify="left")
+        self.mobile_detail.pack(anchor="w", pady=(0, 8))
+        self.mobile_code = tk.StringVar(value="尚未开启")
+        code = tk.Entry(form, textvariable=self.mobile_code, state="readonly", readonlybackground=PALE, fg=INK, relief="flat", font=(FONT, 18), width=18)
+        code.pack(anchor="w", pady=(0, 10))
+        phone_actions = tk.Frame(form, bg=WHITE)
+        phone_actions.pack(fill="x", pady=(0, 8))
+        button(phone_actions, "复制手机地址", self._copy_mobile_url).pack(side="left")
+        button(phone_actions, "电脑预览手机页", self._preview_mobile).pack(side="left", padx=8)
+        button(phone_actions, "更换配对码…", self._rotate_mobile_pairing).pack(side="left")
+        label(form, "聊天、记忆、日志和图库直接共用电脑上的记录；OneDrive 继续备份。\n电脑小屋需保持运行，关闭到托盘后仍可连接；退出或休眠会断开。仅用于可信的局域网，不需要开放路由器端口。", 9, MUTED, wraplength=700, justify="left").pack(anchor="w", pady=(0, 14))
+        tk.Frame(form, height=1, bg=LINE).pack(fill="x", pady=10)
         label(form, "数据住在哪里", 16, bold=True).pack(anchor="w")
         label(form, "工作数据库放在本机；完整恢复包放进你选择的 OneDrive 文件夹。", 10, MUTED, wraplength=680, justify="left").pack(anchor="w", pady=(7, 16))
         self._setting_field(form, "data_dir", "本地工作数据目录", browse=True)
@@ -354,15 +481,201 @@ class Desktop(tk.Tk):
         label(form, "相处偏好保存在“记忆收藏夹”，可查看来源并修改。情绪只影响语气，随时间缓和；不会因为你没回复而扣好感或变得生气。", 9, MUTED, wraplength=700, justify="left").pack(anchor="w", pady=(6, 12))
         tk.Frame(form, height=1, bg=LINE).pack(fill="x", pady=15)
         label(form, "模型与记忆", 16, bold=True).pack(anchor="w", pady=(5, 16))
-        label(form, "服务地址和密钥从仓库 .env 读取；模型名称留空时自动发现。", 9, MUTED).pack(anchor="w", pady=(0, 10))
-        self._setting_field(form, "model", "模型名称")
-        button(form, "重新检测模型连接", self.core.connect).pack(anchor="w", pady=(0, 13))
+        memory_tools = tk.BooleanVar(value=self.settings.memory_tools_enabled)
+        self.setting_vars["memory_tools_enabled"] = memory_tools
+        tk.Checkbutton(form, text="允许本鱼按对话语义查询、新增和修订收藏夹", variable=memory_tools, bg=WHITE, fg=INK, anchor="w").pack(anchor="w", pady=(0, 6))
+        label(form, "开启后每轮多一次记忆工具判断请求，能理解“再试试”这类接续语；关闭后保留只读记忆参考与每日归档。", 9, MUTED, wraplength=700, justify="left").pack(anchor="w", pady=(0, 14))
+        consolidation = tk.BooleanVar(value=self.settings.memory_consolidation_enabled)
+        self.setting_vars["memory_consolidation_enabled"] = consolidation
+        tk.Checkbutton(form, text="空闲时后台归纳主题卡（原始记忆保留）", variable=consolidation, bg=WHITE, fg=INK, anchor="w").pack(anchor="w", pady=(0, 12))
+        evolution=tk.BooleanVar(value=self.settings.memory_evolution_enabled)
+        self.setting_vars['memory_evolution_enabled']=evolution
+        tk.Checkbutton(form,text='明确状态变化自动转为新旧版本（含糊变化仅待核对）',variable=evolution,bg=WHITE,fg=INK,anchor='w').pack(anchor='w',pady=(0,12))
         self._setting_field(form, "context_tokens", "模型上下文容量（tokens，请按实际部署填写）")
         self._setting_field(form, "reply_tokens", "每次回复上限（tokens）")
         self._setting_field(form, "timeout_seconds", "请求超时（秒）")
         self._setting_field(form, "idle_minutes", "对话空闲多少分钟后整理日志")
         self._setting_field(form, "journal_chunk_chars", "当日对话达到多少字符后分段归档")
         label(form, "上下文长度采用保守估算，并留出回复空间。\n保存设置后会重新打开窗口；改变数据目录会先复制当前数据，原目录保留。", 9, MUTED, wraplength=710, justify="left").pack(anchor="w", pady=(8, 16))
+
+    def _choose_pet_electron(self):
+        path = filedialog.askopenfilename(parent=self, title="选择 Electron 可执行文件")
+        if path:
+            self.setting_vars['pet_electron_path'].set(path)
+
+    def _start_pet(self):
+        from .pet import PetRuntime
+        try:
+            if self.pet_runtime:
+                self.pet_runtime.close()
+                self.pet_runtime = None
+            values = asdict(self.settings)
+            for key in ('pet_plugin_dir','pet_electron_path','pet_size','pet_fixed','pet_voice_enabled','pet_voice_name'):
+                value = self.setting_vars[key].get()
+                values[key] = int(value) if key == 'pet_size' else bool(value) if key in ('pet_fixed','pet_voice_enabled') else value.strip()
+            options = Settings(**values)
+            options.validate()
+            self.pet_runtime = PetRuntime(self.core, options, self.session)
+            self.pet_runtime.start()
+            self.setting_vars['pet_enabled'].set(True)
+            self.pet_detail.configure(text="桌宠已启动，正在加载透明动画。右键可对话、选择动作或睡觉。\n与当前会话共用角色、记忆和日志；保存设置后可随小屋自动启动。", fg=MUTED)
+        except (ValueError, OSError) as error:
+            if self.pet_runtime:
+                self.pet_runtime.close()
+                self.pet_runtime = None
+            self.pet_detail.configure(text="桌宠暂未启动：" + str(error), fg="#BA5B49")
+            if self.pet_update_trial:
+                self.pet_update_trial = False
+                self._pet_update('rollback')
+
+    def _preview_pet_voice(self):
+        if not self.setting_vars['pet_voice_enabled'].get():
+            self.pet_detail.configure(text="先勾选“朗读桌宠回复”，再点击试听。",fg=MUTED)
+            return
+        self._start_pet()
+        if self.pet_runtime:
+            # Let the renderer finish subscribing. This never creates a chat row.
+            runtime = self.pet_runtime
+            self.after(1500,lambda:runtime.bridge.write('main','say',{'text':'Deep！Deep！本鱼的声音来啦，今天也想陪你一起摸鱼。','duration':15000,'voiceTo':'desktop'}) if self.pet_runtime is runtime else None)
+
+    def _open_animation_library(self):
+        from .avatar_ui import AnimationLibrary
+        AnimationLibrary(self,self.core.animations,lambda:self.session)
+
+    def _pet_update(self,action):
+        import threading
+        from .pet_updates import PetUpdates
+        from .pet_support import find_plugin
+        if self.pet_update_busy:
+            return
+        if action == 'install' and not self.pet_release:
+            return
+        try:
+            current = self.pet_runtime.root if self.pet_runtime else find_plugin(self.setting_vars['pet_plugin_dir'].get())
+        except ValueError:
+            current = None
+        self.pet_update_busy = True
+        self.pet_install_button.configure(state='disabled')
+        self.pet_update_detail.configure(text={'check':'正在检查 npm 插件版本…','install':'正在下载、校验并安装桌宠更新…','rollback':'正在回退上一版本…'}[action],fg=MUTED)
+        release = self.pet_release
+        def work():
+            manager = PetUpdates()
+            try:
+                if action == 'check':
+                    result = manager.check(current)
+                elif action == 'install':
+                    result = str(manager.install(release,current,self.settings))
+                else:
+                    result = str(manager.rollback(self.settings))
+                self.core.emit('pet_update_result',action=action,success=True,result=result)
+            except Exception as error:
+                self.core.emit('pet_update_result',action=action,success=False,message=str(error))
+        threading.Thread(target=work,daemon=True,name='pet-updater').start()
+
+    def _pet_update_result(self,event):
+        self.pet_update_busy = False
+        if not event['success']:
+            self.pet_update_detail.configure(text='插件操作未完成：'+event['message'],fg='#BA5B49')
+        elif event['action'] == 'check':
+            self.pet_release = event['result']
+            result = self.pet_release
+            text = f"当前版本：{result['current'] or '未安装'}；最新兼容版本：{result['version']}。"
+            text += ' 可以安装更新。' if result['available'] else ' 当前已是最新兼容版本。'
+            if result['latest'] != result['version']:
+                text += f"\n上游最新 {result['latest']} 尚未适配，将保留当前兼容系列。"
+            self.pet_update_detail.configure(text=text,fg=MUTED)
+        else:
+            # Persist only plugin selection; leave all other unsaved form values alone.
+            self.setting_vars['pet_plugin_dir'].set('')
+            self.settings.pet_plugin_dir = ''
+            self.core.animations.root = None
+            self.core.animations.reload()
+            try:
+                self.settings.save()
+            except OSError:
+                self.pet_update_detail.configure(text='插件已切换，但设置未能保存；下次启动请选择自动寻找。',fg='#BA5B49')
+            else:
+                self.pet_update_detail.configure(text='插件已更新，可随时回退上一版本。' if event['action']=='install' else '已回退上一版本。',fg=MUTED)
+            self.pet_release = None
+            self.pet_update_trial = event['action']=='install'
+            self._start_pet()
+        self.pet_install_button.configure(state='normal' if self.pet_release and self.pet_release.get('available') else 'disabled')
+
+    def _stop_pet(self):
+        if self.pet_runtime:
+            self.pet_runtime.close()
+            self.pet_runtime = None
+        self.setting_vars['pet_enabled'].set(False)
+        self.pet_detail.configure(text="桌宠已隐藏，小屋聊天继续运行。可从“小屋 → 显示桌宠”重新打开。", fg=MUTED)
+
+    def _start_mobile(self):
+        if not self.settings.mobile_enabled:
+            self.mobile_detail.configure(text="手机连接尚未开启。勾选上面的开关并保存设置后，查看地址和配对码。")
+            return
+        try:
+            from .mobile import MobileServer
+            self.mobile_server = MobileServer(self.core).start()
+            self.mobile_code.set(self.mobile_server.pairing.code)
+            urls = self.mobile_server.urls()
+            self.mobile_detail.configure(text="手机浏览器打开（与电脑连接同一 Wi-Fi）：\n" + "\n".join(url for url in urls if "127.0.0.1" not in url) + "\n电脑预览：" + f"http://127.0.0.1:{self.mobile_server.port}" + "\n手机无法连接时，请检查本机防火墙是否允许此端口的专用网络访问。", fg=MUTED)
+        except Exception:
+            self.mobile_server = None
+            self.mobile_code.set("连接服务未启动")
+            self.mobile_detail.configure(text="手机连接未能启动。请检查端口是否被占用，并安装 requirements.txt 中的依赖后重开小屋。电脑聊天仍可使用。", fg="#BA5B49")
+
+    def _copy_mobile_url(self):
+        if not self.mobile_server:
+            self._notice("先开启手机连接并保存设置。")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(self.mobile_server.urls()[0])
+        self.status.configure(text="手机连接地址已复制，请在同一 Wi-Fi 的手机浏览器打开。")
+
+    def _preview_mobile(self):
+        if self.mobile_server:
+            import webbrowser
+            webbrowser.open(f"http://127.0.0.1:{self.mobile_server.port}")
+        else:
+            self._notice("先开启手机连接并保存设置。")
+
+    def _rotate_mobile_pairing(self):
+        if self.mobile_server and messagebox.askyesno("更换手机配对码", "更换后，已连接的手机都需要重新配对。聊天与记忆保留。继续吗？", parent=self):
+            self.mobile_server.pairing.rotate()
+            self.mobile_code.set(self.mobile_server.pairing.code)
+
+    def _reload_connection(self, initial=False):
+        try:
+            connection = ConnectionConfig.load(legacy_model=self.settings.model if initial else "")
+            for key, variable in self.connection_vars.items():
+                variable.set(getattr(connection, key))
+            self.show_api_key.set(False)
+            self.api_key_entry.configure(show="*")
+            text = "已读取连接配置；修改后点击“保存设置并重新打开”生效。"
+            if initial and self.settings.model:
+                text += "\n当前有旧版模型覆盖；从 .env 重新读取可采用新模型，保存后统一使用 .env。"
+            self.connection_detail.configure(text=text, fg=MUTED)
+        except Exception:
+            self.connection_detail.configure(text="未能读取 .env，请检查文件权限和 UTF-8 编码；也可直接填写。", fg="#BA5B49")
+
+    def _connection_draft(self):
+        connection = ConnectionConfig(**{key: variable.get() for key, variable in self.connection_vars.items()})
+        connection.validate()
+        return connection
+
+    def _connection_edited(self, *args):
+        self.connection_detail.configure(text="连接表单已修改；可先测试，保存设置后应用到聊天。", fg=MUTED)
+
+    def _test_connection(self, vision=False):
+        if not self._require_idle():
+            return
+        try:
+            self.core.test_connection(self._connection_draft(), vision=True) if vision else self.core.test_connection(self._connection_draft())
+            self.connection_test_values = tuple(variable.get() for variable in self.connection_vars.values())
+            self.test_connection_button.configure(state="disabled")
+            self.test_vision_button.configure(state="disabled")
+            self.connection_detail.configure(text="正在用测试图片验证填写的接口…" if vision else "正在测试填写的连接，请稍候…", fg=MUTED)
+        except ValueError as error:
+            self.connection_detail.configure(text=str(error), fg="#BA5B49")
 
     def _setting_field(self, parent, key, title, browse=False):
         label(parent, title, 10).pack(anchor="w", pady=(0, 6))
@@ -432,6 +745,8 @@ class Desktop(tk.Tk):
         self._switch("chat")
 
     def _render_chat(self, streaming=False):
+        if self.pet_runtime:
+            self.pet_runtime.session = self.session
         self.chat_text.configure(state="normal")
         self.chat_text.delete("1.0", "end")
         self.chat_images = []
@@ -451,6 +766,9 @@ class Desktop(tk.Tk):
                 self.chat_text.insert("end", message["content"], message["role"])
                 continue
             self.chat_text.insert("end", message["content"] + "\n", message["role"])
+            receipt = receipt_label(message.get("memory_action"))
+            if receipt:
+                self.chat_text.insert("end", "[" + receipt + "]\n", "hint")
             for asset in message.get("attachments", []):
                 tag = f"image-{message['id']}-{asset['id']}"
                 start = self.chat_text.index("end-1c")
@@ -599,10 +917,13 @@ class Desktop(tk.Tk):
         self.stop_button.configure(state="normal" if busy else "disabled")
 
     def _refresh_memories(self):
-        self.memory_items = self.core.store.memories()
+        self.memory_items = self.core.memory.hub.records(include_inactive=True)
+        self.memory_topics = self.core.memory.hub.topics()
+        self.memory_topic_box.configure(values=["自动分类"] + [row["title"] for row in self.memory_topics])
         self.memory_list.delete(0, "end")
         for item in self.memory_items:
-            self.memory_list.insert("end", f"[{item['kind']}] {item['content'][:22]}")
+            marker = "★ " if item["pinned"] else "历史 · " if not item["active"] else "重要 · " if item['importance']>=2 else ""
+            self.memory_list.insert("end", marker + f"[{item['kind']}] {item['content'][:22]}")
         if not self.memory_items:
             self._new_memory()
         else:
@@ -619,14 +940,25 @@ class Desktop(tk.Tk):
         self.memory_kind.set(item["kind"])
         self.memory_text.delete("1.0", "end")
         self.memory_text.insert("1.0", item["content"])
+        self.memory_pin.set(bool(item["pinned"]))
+        self.memory_active.set(bool(item["active"]))
+        from .memory_signals import LEVELS
+        self.memory_importance.set(LEVELS[item['importance']] if item['importance_manual'] else '自动判断')
+        topic_ids = item["topics_override"] or []
+        self.memory_topic.set(next((row["title"] for row in self.memory_topics if row["id"] in topic_ids), "自动分类"))
         sources = self.core.store.message_sources(json.loads(item["source_ids"]))
         text = f"记忆 #{item['id']}\n更新：{item['updated_at']}\n\n"
+        text += '重要程度：'+LEVELS[item['importance']]+('（你指定）' if item['importance_manual'] else '（可修正的自动标签）')+'\n联想线索：'+'、'.join(item['recall_cues'])+'\n\n'
         text += "\n\n".join(f"消息 #{source['id']} · {source['created_at']}\n{source['content']}" for source in sources) if sources else "由你手动添加或修正，没有自动提取的来源。"
         readonly(self.source_text, text)
 
     def _new_memory(self):
         self.current_memory = None
         self.memory_kind.set("事实")
+        self.memory_pin.set(False)
+        self.memory_active.set(True)
+        self.memory_topic.set("自动分类")
+        self.memory_importance.set('自动判断')
         self.memory_text.delete("1.0", "end")
         readonly(self.source_text, "记一件你希望本鱼长期记住的事。\n例如：我希望你称呼我为……")
         self.memory_list.selection_clear(0, "end")
@@ -644,14 +976,49 @@ class Desktop(tk.Tk):
         if not content:
             self._notice("先写一点记忆内容吧。")
             return
-        if self.current_memory:
-            self.core.store.update_memory(self.current_memory, self.memory_kind.get(), content)
-        else:
-            self.core.store.add_memory(self.memory_kind.get(), content)
+        try:
+            topic_ids = next(([row["id"]] for row in self.memory_topics if row["title"] == self.memory_topic.get()), None)
+            self.core.memory.hub.validate_annotation(self.current_memory, bool(self.memory_pin.get()), bool(self.memory_active.get()), topic_ids)
+            if self.current_memory:
+                old = self.core.store.rows("SELECT * FROM memories WHERE id=?", (self.current_memory,))[0]
+                annotations = self.core.store.rows("SELECT topics_override FROM memory_annotations WHERE memory_id=?", (self.current_memory,))
+                previous_topics = json.loads(annotations[0]["topics_override"]) if annotations and annotations[0]["topics_override"] else None
+                if topic_ids and previous_topics and topic_ids[0] in previous_topics:
+                    topic_ids = previous_topics
+                if old["content"] != content or old["kind"] != self.memory_kind.get():
+                    self.core.store.update_memory(self.current_memory, self.memory_kind.get(), content)
+            else:
+                self.current_memory = self.core.store.add_memory(self.memory_kind.get(), content)
+                if self.current_memory is None:
+                    self.current_memory = self.core.store.rows("SELECT id FROM memories WHERE content=?", (content,))[0]["id"]
+            self.core.memory.hub.annotate(self.current_memory, bool(self.memory_pin.get()), bool(self.memory_active.get()), topic_ids)
+            from .memory_signals import LEVELS
+            value=self.memory_importance.get()
+            self.core.memory.hub.signals.set_importance(self.current_memory,None if value=='自动判断' else LEVELS.index(value))
+        except ValueError as error:
+            self._notice(str(error))
+            return
         self.core.memory.export_journals()
         self._refresh_memories()
         self.status.configure(text="记忆已保存。下次聊天时，本鱼会参考它。")
         self.core.maintain(backup_now=True)
+
+    def _open_memory_hub(self):
+        from .memory_ui import HubWindow
+        if self.memory_hub_window and self.memory_hub_window.winfo_exists():
+            self.memory_hub_window.refresh()
+            self.memory_hub_window.lift()
+        else:
+            self.memory_hub_window = HubWindow(self)
+
+    def _show_memory_activation(self):
+        from .memory_ui import show_activation
+        show_activation(self)
+
+    def _show_memory_versions(self):
+        if self.current_memory:
+            from .memory_ui import show_versions
+            show_versions(self, self.current_memory)
 
     def _forget_memory(self):
         if not self.current_memory or not self._require_idle():
@@ -726,12 +1093,14 @@ class Desktop(tk.Tk):
         if not self._require_idle():
             return
         try:
+            connection = self._connection_draft()
             values = asdict(self.settings)
             for key, variable in self.setting_vars.items():
                 if isinstance(getattr(self.settings, key), bool):
                     values[key] = bool(variable.get())
                 else:
                     values[key] = int(variable.get()) if isinstance(getattr(self.settings, key), int) else variable.get().strip()
+            values["model"] = ""  # Migrate the old override; .env is the single editable source.
             updated = Settings(**values)
             updated.validate()
             destination = Path(updated.data_dir)
@@ -747,6 +1116,7 @@ class Desktop(tk.Tk):
                 Path(updated.backup_dir).mkdir(parents=True, exist_ok=True)
                 with tempfile.TemporaryFile(dir=updated.backup_dir):
                     pass
+            connection.save()
             updated.save()
             self.restart = True
             self._close(restarting=True)
@@ -796,13 +1166,71 @@ class Desktop(tk.Tk):
             while True:
                 event = self.core.events.get_nowait()
                 kind = event["kind"]
-                if kind == "connected":
+                if kind == "connection_test_done":
+                    self.test_connection_button.configure(state="normal")
+                    self.test_vision_button.configure(state="normal")
+                    if tuple(variable.get() for variable in self.connection_vars.values()) != self.connection_test_values:
+                        self.connection_detail.configure(text="表单在测试期间已修改，请重新测试当前填写的连接。", fg=MUTED)
+                    elif event["success"] and event.get("vision"):
+                        self.connection_detail.configure(text=event['message'] + "\n模型：" + event['model'] + "\n测试不改变当前配置；保存设置后应用所选识图模式。", fg="#4D957E" if event['vision_available'] else "#BA5B49")
+                    elif event["success"]:
+                        self.connection_detail.configure(text="测试成功 · 模型：" + event["model"] + "\n点击“保存设置并重新打开”应用到聊天。", fg="#4D957E")
+                    else:
+                        self.connection_detail.configure(text="测试未通过：" + event["message"], fg="#BA5B49")
+                elif kind == "vision_status":
+                    self.vision_detail.configure(text=event['text'])
+                elif kind == 'pet_error':
+                    self.pet_detail.configure(text=event['message'], fg="#BA5B49")
+                    self.status.configure(text=event['message'])
+                    if self.pet_update_trial:
+                        self.pet_update_trial = False
+                        self._pet_update('rollback')
+                elif kind == 'pet_update_result':
+                    self._pet_update_result(event)
+                elif kind == 'pet_hide':
+                    self._stop_pet()
+                elif kind == 'pet_reload':
+                    self._start_pet()
+                elif kind == 'pet_open':
+                    self._show_window()
+                    target = event.get('session')
+                    if target and not self.core.chat_pending and not self.input.get('1.0','end-1c').strip() and not self.pending_images:
+                        self.session = target
+                        self._refresh_sessions()
+                        self._render_chat()
+                    self._switch('chat')
+                elif kind == "connected":
                     self.model_label = event["model"]
                     self.connection.configure(text="●  " + self.model_label[:28], fg="#4D957E")
                 elif kind == "user_saved":
                     self._refresh_sessions()
+                    if event["session"] == self.session:
+                        self._render_chat()
+                elif kind == "data_changed":
+                    self._refresh_sessions()
+                    if self.memory_hub_window and self.memory_hub_window.winfo_exists():
+                        self.memory_hub_window.refresh()
+                    if self.page == "memories":
+                        self._refresh_memories()
+                    elif self.page == "journals":
+                        self._refresh_journals()
+                elif kind == "memory_action_done":
+                    if self.memory_hub_window and self.memory_hub_window.winfo_exists():
+                        self.memory_hub_window.refresh()
+                    if event["session"] == self.session:
+                        self._render_chat()
+                    if self.page == "memories":
+                        self._refresh_memories()
+                    saved_notice = receipt_label(event["result"])
+                    if saved_notice:
+                        self.status.configure(text=saved_notice)
+                elif kind == "memory_organized":
+                    if self.memory_hub_window and self.memory_hub_window.winfo_exists():
+                        self.memory_hub_window.refresh()
+                    self.status.configure(text=f"已归纳 {event['count']} 张主题卡，原始记忆保留。")
                 elif kind == "reply_start":
                     self.streaming_session = event["session"]
+                    self._set_busy(True)
                     self._render_chat(streaming=True)
                     self.status.configure(text="本鱼正在写回信…")
                 elif kind == "delta" and event["session"] == self.session:
@@ -859,6 +1287,9 @@ class Desktop(tk.Tk):
         except queue.Empty:
             pass
         if self.winfo_exists():
+            # Windows activation can precede or omit Tk's FocusIn event. Reconcile
+            # unread state regardless of how the user returned to this window.
+            self._on_focus()
             self.after(60, self._poll)
 
     def _tick(self):
@@ -902,5 +1333,10 @@ class Desktop(tk.Tk):
         self.exiting = True
         if self.tray:
             self.tray.close()
+        if self.mobile_server:
+            self.mobile_server.close()
+        if self.pet_runtime:
+            self.pet_runtime.close()
+            self.pet_runtime = None
         self.core.shutdown()
         self.destroy()

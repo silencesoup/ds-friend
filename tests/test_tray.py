@@ -8,7 +8,9 @@ import threading
 import unittest
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
+from unittest.mock import Mock
+import queue
 
 from whale_friend.app import Desktop
 from whale_friend.config import Settings
@@ -43,6 +45,71 @@ class UnreadTests(unittest.TestCase):
 
 
 class WindowLifecycleTests(unittest.TestCase):
+    def reading_window(self, state="normal", foreground=True, viewable=True):
+        window = SimpleNamespace(
+            session="current", page="chat", hidden_to_tray=False, exiting=False,
+            unread=UnreadMessages(), base_title="test", title=Mock(), _refresh_sessions=Mock(),
+            state=lambda: state, winfo_viewable=lambda: viewable, winfo_id=lambda: 123,
+            tray=SimpleNamespace(foreground=lambda handle: foreground, set_unread=Mock(), actions=queue.Queue()),
+            core=SimpleNamespace(events=queue.Queue()), after=Mock(), winfo_exists=lambda: True,
+        )
+        for name in ("_reading", "_update_unread", "_on_focus", "_incoming", "_poll"):
+            setattr(window, name, MethodType(getattr(Desktop, name), window))
+        return window
+
+    def test_maximized_foreground_chat_is_read_when_reply_arrives(self):
+        window = self.reading_window(state="zoomed")
+        window._incoming("current")
+        self.assertEqual(window.unread.count, 0)
+        window.tray.set_unread.assert_called_with(0)
+
+    def test_returning_to_main_window_clears_unread_without_tray_or_focus_event(self):
+        window = self.reading_window()
+        window.unread.receive("current")
+        Desktop._poll(window)
+        self.assertEqual(window.unread.count, 0)
+        window.tray.set_unread.assert_called_with(0)
+
+    def test_visible_restored_window_does_not_depend_on_stale_hidden_flag(self):
+        window = self.reading_window()
+        window.hidden_to_tray = True
+        window.unread.receive("current")
+        window._on_focus()
+        self.assertEqual(window.unread.count, 0)
+
+    def test_background_other_pages_and_other_sessions_are_not_marked_read(self):
+        for state, foreground, viewable, page, session in (
+            ("iconic", True, True, "chat", "current"),
+            ("withdrawn", True, False, "chat", "current"),
+            ("normal", False, True, "chat", "current"),
+            ("normal", True, False, "chat", "current"),
+            ("normal", True, True, "settings", "current"),
+            ("normal", True, True, "memories", "current"),
+            ("normal", True, True, "chat", "other"),
+        ):
+            with self.subTest(state=state, foreground=foreground, viewable=viewable, page=page, session=session):
+                window = self.reading_window(state, foreground, viewable)
+                window.page, window.session = page, session
+                window.unread.receive("current")
+                Desktop._poll(window)
+                self.assertEqual(window.unread.count, 1)
+
+    def test_reading_current_session_keeps_other_sessions_unread(self):
+        window = self.reading_window(state="zoomed")
+        window.unread.receive("current")
+        window.unread.receive("other")
+        window._on_focus()
+        self.assertNotIn("current", window.unread.sessions)
+        self.assertEqual(window.unread.sessions, {"other": 1})
+        window.tray.set_unread.assert_called_with(1)
+
+    def test_without_native_tray_only_the_main_window_focus_counts(self):
+        window = self.reading_window()
+        window.tray = None
+        for focused, expected in ((None, False), (SimpleNamespace(winfo_toplevel=lambda: object()), False), (SimpleNamespace(winfo_toplevel=lambda: window), True)):
+            window.focus_displayof = lambda: focused
+            self.assertEqual(window._reading("current"), expected)
+
     def test_closing_to_tray_keeps_generation_running_and_saved(self):
         class WaitingModel(FakeModel):
             def stream(self, messages, cancel, **kwargs):

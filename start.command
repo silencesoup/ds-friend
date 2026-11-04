@@ -60,11 +60,7 @@ if ! "$python_bin" -c 'import PIL' >/dev/null 2>&1; then
 fi
 
 if [[ ! -f .env && -z "${DS_BASE_URL:-${ds_base_url:-${base_url:-}}}" ]]; then
-    printf '%s\n' \
-        '缺少模型配置：请在本脚本所在目录创建 .env，可参考 .env.example。' \
-        '填写 ds_base_url 和 api_key。模型在另一台电脑上时，请使用 Mac 能访问到的服务地址。'
-    pause_on_error
-    exit 1
+    printf '%s\n' '尚未配置模型：打开窗口后，在“设置与备份 → 模型连接”填写 API 地址和密钥。'
 fi
 
 printf '%s\n' '正在打开鲸鱼娘的海边小屋…'

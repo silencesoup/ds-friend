@@ -3,6 +3,9 @@ from __future__ import annotations
 import queue
 import threading
 import time
+import hashlib
+import json
+from dataclasses import replace
 from datetime import datetime
 
 from .backup import Backups
@@ -12,6 +15,7 @@ from .model import Cancelled, ModelClient
 from .presence import Presence, local_time
 from .store import Store, now
 from .assets import AssetError, AssetLibrary, MAX_ATTACHMENTS, StickerFilter
+from .memory_actions import MemoryActions
 
 
 class Companion:
@@ -24,6 +28,7 @@ class Companion:
         self.store = store or Store(Path(settings.data_dir))
         self.assets = AssetLibrary(self.store)
         self.memory = MemoryEngine(self.store, self.model, settings)
+        self.memory_actions = MemoryActions(self.memory)
         self.presence = Presence(self.store, self.model, settings)
         self.memory.runtime_context = self.presence.context
         self.memory.export_journals()
@@ -33,6 +38,7 @@ class Companion:
         self.stop = threading.Event()
         self.cancel = threading.Event()
         self.chat_pending = False
+        self.active_session = ""
         self.maintenance_pending = False
         self.reflection_pending = 0
         self.proactive_pending = False
@@ -41,6 +47,10 @@ class Companion:
         self.started_at = local_time()
         self.operation = ""
         self.sequence = 0
+        self.remote_composing_until = 0.0
+        self.last_chat_error = ""
+        from .animations import AnimationDirector
+        self.animations = AnimationDirector(self)
         self.state_lock = threading.Lock()
         self.worker = threading.Thread(target=self._run, name="companion-worker", daemon=True)
         self.worker.start()
@@ -75,7 +85,29 @@ class Companion:
             self.emit("connected", model=name)
         self._enqueue(0, work, "连接模型")
 
-    def send(self, session: str, text: str, retry=False, attachments=None):
+    def test_connection(self, connection, vision=False):
+        """Probe a draft configuration without applying it or adding chat records."""
+        connection.validate()
+        # Freeze form values before the worker starts and ignore the legacy model override.
+        env = connection.as_env()
+        settings = replace(self.settings, model="")
+
+        def work():
+            try:
+                client = ModelClient(settings, env=env)
+                if vision:
+                    available = client.ensure_vision(force=True)
+                    self.emit("connection_test_done", success=True, model=client.model, vision=True, vision_available=available, message=client.vision_status)
+                else:
+                    client.check_connection()
+                    self.emit("connection_test_done", success=True, model=client.model)
+            except Exception as error:
+                # Unexpected exception text can contain request/header details.
+                from .model import ModelError
+                self.emit("connection_test_done", success=False, message=str(error) if isinstance(error, ModelError) else "连接测试未完成，请检查 API 地址、密钥和模型名称。")
+        self._enqueue(0, work, "测试模型连接")
+
+    def send(self, session: str, text: str, retry=False, attachments=None, request_id=None):
         attachments = list(dict.fromkeys(attachments or []))
         if len(attachments) > MAX_ATTACHMENTS:
             raise ValueError(f"每条消息最多附 {MAX_ATTACHMENTS} 张图片")
@@ -84,18 +116,28 @@ class Companion:
         text = text.strip() or ("[图片]" if attachments else "")
         if not text:
             raise ValueError("先写一条消息或选择图片")
+        request_hash = hashlib.sha256(json.dumps([session, text, attachments], ensure_ascii=False).encode()).hexdigest()
         with self.state_lock:
+            if request_id:
+                existing = self.store.rows("SELECT * FROM client_requests WHERE request_id=?", (request_id,))
+                if existing:
+                    if existing[0]["request_hash"] != request_hash:
+                        raise ValueError("同一发送编号不能用于不同消息，请重新发送")
+                    return existing[0]["message_id"]
             if self.chat_pending:
                 raise ValueError("请等待当前回复结束，或先停止生成")
             self.chat_pending = True
+            self.active_session = session
+            self.last_chat_error = ""
             self.cancel.clear()
             self.proactive_cancel.set()
             self.reflection_cancel.set()
-        if self.operation in ("主动来信", "互动观察") and hasattr(self.model, "interrupt"):
+            self.memory.hub.cancel.set()
+        if (self.operation in ("主动来信", "互动观察") or self.memory.hub.organizing) and hasattr(self.model, "interrupt"):
             threading.Thread(target=self.model.interrupt, daemon=True).start()
         try:
             if not retry:
-                identity = self.store.add_message(session, "user", text.strip(), attachments=attachments)
+                identity = self.store.add_message(session, "user", text.strip(), attachments=attachments, request_id=request_id, request_hash=request_hash)
                 if len(self.store.messages(session)) == 1:
                     self.store.execute("UPDATE sessions SET title=? WHERE id=?", (text.strip().replace("\n", " ")[:22], session))
                 self.emit("user_saved", session=session, identity=identity)
@@ -112,8 +154,19 @@ class Companion:
             succeeded = False
             try:
                 self.emit("status", text="正在回忆，听你说…")
+                nearby = self.store.messages(session, complete_only=True)[-8:]
+                if self.settings.vision_mode != "off" and any(m['role'] == 'user' and m.get('attachments') for m in nearby) and hasattr(self.model, 'ensure_vision'):
+                    self.emit("status", text="正在准备图片，检查视觉输入…")
+                    self.model.ensure_vision(self.cancel)
+                    self.emit("vision_status", text=self.model.vision_status if hasattr(self.model, 'vision_status') else "识图已开启")
+                memory_result = self.memory_actions.run(identity, self.cancel)
+                if memory_result:
+                    self.emit("memory_action_done", session=session, identity=identity, result=memory_result)
                 catalog = self.assets.catalog(text + " " + self.presence.mood()["mood"], limit=3 if self.settings.context_tokens >= 8192 else 1)
-                context = self.memory.build_context(session, text, self.cancel, image_catalog=catalog)
+                animation_hint,offered = self.animations.prompt(text,budget=min(850,self.settings.context_tokens//8))
+                context = self.memory.build_context(session, text, self.cancel, image_catalog=catalog, action_context=self.memory_actions.context(memory_result), animation_context=animation_hint)
+                from .animations import MotionFilter
+                motion_filter = MotionFilter(offered)
                 sticker_filter = StickerFilter([row["id"] for row in catalog])
                 if self.cancel.is_set():
                     raise Cancelled("已停止生成")
@@ -121,14 +174,14 @@ class Companion:
                 self.emit("reply_start", session=session, identity=assistant)
                 last_save = time.monotonic()
                 for chunk in self.model.stream(context, self.cancel):
-                    chunk = sticker_filter.feed(chunk)
+                    chunk = sticker_filter.feed(motion_filter.feed(chunk))
                     answer += chunk
                     if chunk:
                         self.emit("delta", session=session, text=chunk)
                     if time.monotonic() - last_save >= 0.7:
                         self.store.finish_message(assistant, answer, "pending")
                         last_save = time.monotonic()
-                tail = sticker_filter.feed("", final=True)
+                tail = sticker_filter.feed(motion_filter.feed("",final=True), final=True)
                 if tail:
                     answer += tail
                     self.emit("delta", session=session, text=tail)
@@ -136,10 +189,12 @@ class Companion:
                 if not answer.strip() and not selected:
                     raise ValueError("模型没有返回有效文字或可用图片，可以重试")
                 self.store.finish_message(assistant, answer, "complete", attachments=selected)
+                self.animations.record(assistant,motion_filter.selected)
                 succeeded = True
                 self.emit("reply_done", session=session)
             except Exception as error:
                 cancelled = self.cancel.is_set() or isinstance(error, Cancelled)
+                self.last_chat_error = "已停止生成，部分回复已保留。" if cancelled else str(error)
                 if assistant is not None:
                     self.store.finish_message(assistant, answer, "interrupted" if cancelled else "failed")
                 self.emit("reply_error", session=session, message="已停止生成，部分回复已保留。" if cancelled else str(error))
@@ -151,6 +206,7 @@ class Companion:
                     self.observe(identity)
                 self.maintain(backup_now=True)
         self._enqueue(0, work, "角色聊天")
+        return identity
 
     def retry(self, session: str):
         messages = self.store.messages(session)
@@ -179,6 +235,9 @@ class Companion:
                 except Exception as error:
                     self.store.set_meta("journal_error", str(error))
                     self.emit("maintenance_warning", message=str(error))
+                organized = self.memory.hub.consolidate(force=force, should_yield=lambda: self.chat_pending or self.stop.is_set())
+                if organized:
+                    self.emit("memory_organized", count=organized)
                 if self.settings.backup_dir:
                     stamp = self.store.meta("last_backup_at")
                     due = not stamp or (datetime.now().astimezone() - datetime.fromisoformat(stamp)).total_seconds() >= self.settings.backup_minutes * 60
@@ -226,7 +285,7 @@ class Companion:
     def maybe_proactive(self, composing=False, at=None) -> bool:
         moment = at or local_time()
         # A short startup grace period avoids immediately contacting the user about old history.
-        if composing or (moment - self.started_at).total_seconds() < 300:
+        if composing or time.monotonic() < self.remote_composing_until or (moment - self.started_at).total_seconds() < 300:
             return False
         with self.state_lock:
             if self.chat_pending or self.proactive_pending or self.reflection_pending or self.maintenance_pending or self.operation or not self.tasks.empty() or self.stop.is_set():
@@ -246,9 +305,12 @@ class Companion:
                 if not current or current["id"] != user["id"]:
                     return
                 catalog = self.assets.catalog(user["content"] + " " + self.presence.mood()["mood"], limit=3 if self.settings.context_tokens >= 8192 else 1)
-                raw = self.presence.compose(self.memory, user, self.proactive_cancel, image_catalog=catalog)
+                animation_hint,offered = self.animations.prompt(user['content'],budget=min(400,self.settings.context_tokens//12))
+                raw = self.presence.compose(self.memory, user, self.proactive_cancel, image_catalog=catalog, animation_context=animation_hint)
+                from .animations import MotionFilter
+                motion_filter = MotionFilter(offered)
                 selector = StickerFilter([row["id"] for row in catalog])
-                answer = selector.feed(raw, final=True)
+                answer = selector.feed(motion_filter.feed(raw,final=True), final=True)
                 selected = self.assets.reusable(selector.selected)
                 if self.proactive_cancel.is_set() or self.chat_pending or self.stop.is_set():
                     return
@@ -260,6 +322,7 @@ class Companion:
                     return
                 stamp = (at or local_time()).isoformat(timespec="seconds")
                 identity = self.store.add_proactive(user, answer, stamp, attachments=selected)
+                self.animations.record(identity,motion_filter.selected)
                 self.store.set_meta("proactive_retry_after", "")
                 delivered = True
                 self.emit("proactive_done", session=user["session_id"], identity=identity)
@@ -280,10 +343,11 @@ class Companion:
             threading.Thread(target=self.model.interrupt, daemon=True).start()
 
     def shutdown(self):
+        self.memory.hub.cancel.set()
         self.proactive_cancel.set()
         self.reflection_cancel.set()
         self.cancel_reply()
-        if self.operation in ("主动来信", "互动观察") and hasattr(self.model, "interrupt"):
+        if (self.operation in ("主动来信", "互动观察") or self.memory.hub.organizing) and hasattr(self.model, "interrupt"):
             threading.Thread(target=self.model.interrupt, daemon=True).start()
         self.stop.set()
         self.worker.join(timeout=0.6)

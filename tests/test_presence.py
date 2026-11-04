@@ -187,6 +187,17 @@ class PresenceTests(unittest.TestCase):
         self.store.update_memory(memory["id"], "相处偏好", "用户现在喜欢本鱼适度主动")
         self.assertIsNotNone(self.presence.permits(self.at))
 
+    def test_archived_quiet_preference_stops_applying_without_deletion(self):
+        user_id = self.exchange("以后别主动打扰我，等我先开口。")
+        self.store.remember_preference("proactivity", "安静", PREFERENCES["proactivity"]["安静"], user_id)
+        self.assertIsNone(self.presence.permits(self.at))
+        from whale_friend.memory import MemoryEngine
+        hub = MemoryEngine(self.store, self.model, self.settings).hub
+        identity = self.store.memories()[0]["id"]
+        hub.annotate(identity, active=False)
+        self.assertIsNotNone(self.presence.permits(self.at))
+        self.assertEqual(self.store.memories()[0]["id"], identity)
+
     def test_mood_decays_and_deleted_source_stops_affecting_state(self):
         user_id = self.exchange()
         self.presence.reflect(user_id, threading.Event())

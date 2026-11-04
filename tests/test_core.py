@@ -23,8 +23,22 @@ class FakeModel:
         self.calls = []
         self.malformed = False
         self.fail = False
+        self.memory_plans = []
+        self.topic_summaries = []
 
     def complete(self, messages, **kwargs):
+        if "主题记忆归纳器" in messages[0]["content"]:
+            self.topic_summaries.append(messages)
+            if self.fail:
+                raise ModelError("模拟离线")
+            data = json.loads(messages[1]["content"])
+            sources = data["previous_source_ids"] + [row["id"] for row in data["new_memories"]]
+            return json.dumps({"summary": "；".join(row["content"][:90] for row in data["new_memories"])[:250], "memory_ids": sources}, ensure_ascii=False)
+        if "即时记忆执行器" in messages[0]["content"]:
+            self.memory_plans.append(messages)
+            if self.fail:
+                raise ModelError("模拟离线")
+            return '{"action":"none","reason":"not_requested"}'
         self.calls.append(messages)
         if self.fail:
             raise ModelError("模拟离线")

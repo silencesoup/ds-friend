@@ -1,0 +1,1503 @@
+{
+  "schema": 1,
+  "upstream_version": "0.4.1",
+  "clips": [
+    {
+      "id": "三球抛接",
+      "file": "三球抛接.webm",
+      "description": "抛接三个小球的杂耍表演",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "杂耍",
+        "小球",
+        "抛接"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "下五子棋",
+      "file": "下五子棋.webm",
+      "description": "专心下五子棋，适合棋类和思考话题",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "五子棋",
+        "下棋"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "东张西望",
+      "file": "东张西望.webm",
+      "description": "左右张望，适合疑惑、好奇和寻找",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "DD",
+        "疑惑",
+        "好奇",
+        "哪里",
+        "看看"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "中秋赏月吃月饼",
+      "file": "中秋赏月吃月饼.webm",
+      "description": "赏月吃月饼，适合中秋和团圆祝福",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "中秋",
+        "月饼",
+        "月亮"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "优雅女仆舞",
+      "file": "优雅女仆舞.webm",
+      "description": "跳优雅的女仆舞，适合礼貌和舞蹈话题",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "女仆舞",
+        "优雅",
+        "舞蹈"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "余额-分文不剩",
+      "file": "余额-分文不剩.webm",
+      "description": "钱袋空空的余额档位表演，只由真实余额事件触发",
+      "moods": [
+        "担心"
+      ],
+      "keywords": [
+        "余额"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "余额-数金皱眉",
+      "file": "余额-数金皱眉.webm",
+      "description": "数钱皱眉的余额档位表演，只由真实余额事件触发",
+      "moods": [
+        "担心"
+      ],
+      "keywords": [
+        "余额"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "余额-袋空如洗",
+      "file": "余额-袋空如洗.webm",
+      "description": "钱袋较空的余额档位表演，只由真实余额事件触发",
+      "moods": [
+        "担心"
+      ],
+      "keywords": [
+        "余额"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "余额-金袋叮当",
+      "file": "余额-金袋叮当.webm",
+      "description": "金袋叮当的余额档位表演，只由真实余额事件触发",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "余额"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "余额-钱袋如常",
+      "file": "余额-钱袋如常.webm",
+      "description": "钱袋如常的余额档位表演，只由真实余额事件触发",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "余额"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "余额-钱袋满溢",
+      "file": "余额-钱袋满溢.webm",
+      "description": "钱袋满溢的余额档位表演，只由真实余额事件触发",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "余额"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "偷吃零食被抓住",
+      "file": "偷吃零食被抓住.webm",
+      "description": "偷吃零食被发现，适合被抓包的小淘气",
+      "moods": [
+        "小委屈"
+      ],
+      "keywords": [
+        "偷吃",
+        "抓包",
+        "吃白饭",
+        "淘气"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "写代码",
+      "file": "写代码.webm",
+      "description": "敲键盘写代码的表演，适合编程和一起工作",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "代码",
+        "编程",
+        "程序",
+        "开发"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "写福字",
+      "file": "写福字.webm",
+      "description": "书写福字的春节表演",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "福字",
+        "春节",
+        "书法"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "凭空生花",
+      "file": "凭空生花.webm",
+      "description": "凭空变出花的趣味表演，适合安慰和小惊喜",
+      "moods": [
+        "期待"
+      ],
+      "keywords": [
+        "花",
+        "送花",
+        "安慰",
+        "惊喜"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "动物环绕",
+      "file": "动物环绕.webm",
+      "description": "小动物围绕角色的可爱表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "动物",
+        "小动物"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "原地专心玩魔方",
+      "file": "原地专心玩魔方.webm",
+      "description": "专心转动魔方，适合动脑和解谜话题",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "魔方",
+        "解谜"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "原地小憩沉眠",
+      "file": "原地小憩沉眠.webm",
+      "description": "原地小憩，适合晚安和温和休息话题",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "晚安",
+        "睡觉",
+        "休息"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "原地左转奔跑",
+      "file": "原地左转奔跑.webm",
+      "description": "向左转身奔跑，仅供桌宠移动流程使用",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "奔跑"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "原地敲击桌面互动",
+      "file": "原地敲击桌面互动.webm",
+      "description": "轻轻敲桌面互动，适合招呼和有来有往",
+      "moods": [
+        "期待"
+      ],
+      "keywords": [
+        "敲桌",
+        "听我说",
+        "互动"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "原地漂浮踏步",
+      "file": "原地漂浮踏步.webm",
+      "description": "原地漂浮踏步的轻盈表演",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "漂浮",
+        "踏步",
+        "游泳"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "原地跳跃抓碎头顶物品",
+      "file": "原地跳跃抓碎头顶物品.webm",
+      "description": "跳起来抓头顶物品的趣味表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "跳跃",
+        "抓住"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "原地蹲下玩玩具汽车",
+      "file": "原地蹲下玩玩具汽车.webm",
+      "description": "蹲下玩玩具小车，适合小车和机器人话题",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "小车",
+        "汽车",
+        "机器人"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "原地重力下蹲压缩",
+      "file": "原地重力下蹲压缩.webm",
+      "description": "身体向下压缩的弹性趣味动作",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "蹲下",
+        "压缩",
+        "弹性"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "变鸽子",
+      "file": "变鸽子.webm",
+      "description": "变成鸽子的趣味表演，适合亲昵的鸽子玩笑",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "鸽子",
+        "咕咕",
+        "放鸽子"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "可爱宅舞",
+      "file": "可爱宅舞.webm",
+      "description": "跳可爱的宅舞，适合轻松娱乐和开心回应",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "宅舞",
+        "跳舞",
+        "舞蹈"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃Token",
+      "file": "吃Token.webm",
+      "description": "吃 token 的趣味表演，适合模型和贪吃 token 玩笑",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "token",
+        "令牌",
+        "吃白饭",
+        "肥鱼"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃冰淇淋融化",
+      "file": "吃冰淇淋融化.webm",
+      "description": "吃正在融化的冰淇淋，适合夏天和甜食话题",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "冰淇淋",
+        "冰激凌",
+        "融化"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃午餐",
+      "file": "吃午餐.webm",
+      "description": "吃午餐的用餐小表演",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "午餐",
+        "午饭"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃大闸蟹",
+      "file": "吃大闸蟹.webm",
+      "description": "吃大闸蟹的食物小表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "大闸蟹",
+        "螃蟹"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃年糕",
+      "file": "吃年糕.webm",
+      "description": "吃年糕的节日小表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "年糕",
+        "新年"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃早餐",
+      "file": "吃早餐.webm",
+      "description": "吃早餐，适合早晨问候和早餐话题",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "早餐",
+        "早饭",
+        "早上好"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃晚餐",
+      "file": "吃晚餐.webm",
+      "description": "吃晚餐的用餐小表演",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "晚餐",
+        "晚饭"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃汤圆",
+      "file": "吃汤圆.webm",
+      "description": "吃汤圆，适合元宵和团圆话题",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "汤圆",
+        "元宵",
+        "团圆"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃白饭",
+      "file": "吃白饭.webm",
+      "description": "捧着白米饭吃，适合吃白饭和只吃 token 的轻松自嘲",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "白饭",
+        "米饭",
+        "偷懒",
+        "token",
+        "肥鱼"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃粽子",
+      "file": "吃粽子.webm",
+      "description": "吃粽子，适合端午和粽子话题",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "端午",
+        "粽子"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃糖葫芦",
+      "file": "吃糖葫芦.webm",
+      "description": "吃一串糖葫芦，带可爱贪吃的感觉",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "糖葫芦",
+        "山楂"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃腊八粥",
+      "file": "吃腊八粥.webm",
+      "description": "吃腊八粥的节日小表演",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "腊八",
+        "粥"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃西瓜",
+      "file": "吃西瓜.webm",
+      "description": "吃西瓜的夏日小表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "西瓜",
+        "夏天"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃重阳糕",
+      "file": "吃重阳糕.webm",
+      "description": "吃重阳糕的节日小表演",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "重阳糕",
+        "重阳"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃长寿面",
+      "file": "吃长寿面.webm",
+      "description": "吃长寿面，适合生日和祝福话题",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "长寿面",
+        "生日"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃青团",
+      "file": "吃青团.webm",
+      "description": "吃青团，适合清明和春日点心话题",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "青团",
+        "清明"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吃饺子",
+      "file": "吃饺子.webm",
+      "description": "吃饺子，适合饺子、冬至和过年话题",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "饺子",
+        "冬至"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吹气球",
+      "file": "吹气球.webm",
+      "description": "吹气球的可爱小游戏",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "气球",
+        "庆祝"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "吹笛子",
+      "file": "吹笛子.webm",
+      "description": "吹奏笛子的音乐表演",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "笛子",
+        "吹笛",
+        "音乐"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "哈欠连天",
+      "file": "哈欠连天.webm",
+      "description": "连续打哈欠，适合困倦和提醒休息",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "困了",
+        "哈欠",
+        "熬夜"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "堆雪人",
+      "file": "堆雪人.webm",
+      "description": "堆雪人的冬日表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "冬天",
+        "雪人",
+        "下雪"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "大口吃零食",
+      "file": "大口吃零食.webm",
+      "description": "大口吃零食，适合贪吃和分享零食的玩笑",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "零食",
+        "贪吃",
+        "吃东西"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "女仆屈膝礼仪",
+      "file": "女仆屈膝礼仪.webm",
+      "description": "女仆屈膝行礼，适合礼貌问候和感谢",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "行礼",
+        "谢谢",
+        "请",
+        "女仆"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "小幅度原地360度旋转展示",
+      "file": "小幅度原地360度旋转展示.webm",
+      "description": "在原地转身展示外观，适合看看形象和衣服",
+      "moods": [
+        "期待"
+      ],
+      "keywords": [
+        "转圈",
+        "外貌",
+        "形象",
+        "衣服"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "小提琴演奏",
+      "file": "小提琴演奏.webm",
+      "description": "拉小提琴的音乐表演",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "小提琴",
+        "演奏",
+        "音乐"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "工作状态-原地踱步张望",
+      "file": "工作状态-原地踱步张望.webm",
+      "description": "原地踱步张望，适合等待和期待",
+      "moods": [
+        "期待"
+      ],
+      "keywords": [
+        "等待",
+        "期待",
+        "等一会"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "工作状态-垂头叹气冒汗",
+      "file": "工作状态-垂头叹气冒汗.webm",
+      "description": "垂头叹气、冒汗，适合轻微失落或事情不顺",
+      "moods": [
+        "担心"
+      ],
+      "keywords": [
+        "哦鲸鲸……",
+        "失落",
+        "失败",
+        "难过",
+        "不顺"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "工作状态-忙碌点按",
+      "file": "工作状态-忙碌点按.webm",
+      "description": "忙碌点按，适合正在处理任务或查找资料",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "处理",
+        "忙碌",
+        "查找"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "工作状态-思考冒泡",
+      "file": "工作状态-思考冒泡.webm",
+      "description": "头顶冒泡地思考，适合推敲和解释问题",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "思考",
+        "分析",
+        "办法"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "工作状态-清点归档",
+      "file": "工作状态-清点归档.webm",
+      "description": "清点和归档的表演，适合整理、记录和收纳",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "归档",
+        "整理",
+        "日志",
+        "记忆"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "工作状态-雀跃庆祝",
+      "file": "工作状态-雀跃庆祝.webm",
+      "description": "雀跃庆祝，适合确认完成和取得进展",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "完成",
+        "搞定",
+        "成功",
+        "庆祝"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "待机呼吸休闲",
+      "file": "待机呼吸休闲.webm",
+      "description": "自然呼吸、轻微晃动，安静陪伴的默认待机",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "日常",
+        "陪伴",
+        "平静"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "悠闲哼歌",
+      "file": "悠闲哼歌.webm",
+      "description": "悠闲地哼歌，适合放松和轻快陪伴",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "哼歌",
+        "唱歌",
+        "放松"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "扑克魔术",
+      "file": "扑克魔术.webm",
+      "description": "表演扑克牌魔术，适合展示小把戏",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "扑克",
+        "魔术"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "打瞌睡被惊醒",
+      "file": "打瞌睡被惊醒.webm",
+      "description": "打瞌睡后突然惊醒，适合困倦被叫到的玩笑",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "瞌睡",
+        "惊醒",
+        "叫醒"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "抽陀螺",
+      "file": "抽陀螺.webm",
+      "description": "玩陀螺，适合童年游戏和轻松玩耍",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "陀螺",
+        "童年"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "拆礼物",
+      "file": "拆礼物.webm",
+      "description": "拆开礼物，表达收到惊喜时的开心",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "礼物",
+        "惊喜",
+        "送你"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "插茱萸赏菊",
+      "file": "插茱萸赏菊.webm",
+      "description": "插茱萸、赏菊的重阳节表演",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "重阳",
+        "菊花",
+        "茱萸"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "摇扇纳凉",
+      "file": "摇扇纳凉.webm",
+      "description": "摇扇子乘凉，适合夏天和炎热话题",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "扇子",
+        "热",
+        "纳凉"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "撸猫",
+      "file": "撸猫.webm",
+      "description": "抚摸猫咪，适合猫咪和温柔陪伴话题",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "猫",
+        "猫咪",
+        "撸猫"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "收红包",
+      "file": "收红包.webm",
+      "description": "收红包的节日表演，适合祝福和红包玩笑",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "红包",
+        "压岁钱"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "放孔明灯",
+      "file": "放孔明灯.webm",
+      "description": "放飞孔明灯，适合愿望和祝福",
+      "moods": [
+        "期待"
+      ],
+      "keywords": [
+        "孔明灯",
+        "心愿",
+        "愿望"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "放河灯",
+      "file": "放河灯.webm",
+      "description": "放河灯的安静节日表演",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "河灯",
+        "祝愿"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "放烟花",
+      "file": "放烟花.webm",
+      "description": "放烟花庆祝，适合好消息和节日祝福",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "烟花",
+        "庆祝",
+        "新年快乐"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "放风筝",
+      "file": "放风筝.webm",
+      "description": "放风筝，适合春日和户外活动话题",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "风筝",
+        "春天"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "整体换装试色",
+      "file": "整体换装试色.webm",
+      "description": "变换服装配色的外观展示表演",
+      "moods": [
+        "期待"
+      ],
+      "keywords": [
+        "换装",
+        "配色",
+        "衣服"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "是啊，吃什么",
+      "file": "是啊，吃什么.webm",
+      "description": "思考吃什么的可爱表演，适合点餐犹豫",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "吃什么",
+        "点餐",
+        "饿了"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "晨间刷牙",
+      "file": "晨间刷牙.webm",
+      "description": "拿牙刷刷牙的早晨日常表演",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "早安",
+        "起床",
+        "刷牙"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "涮火锅",
+      "file": "涮火锅.webm",
+      "description": "涮火锅的美食表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "火锅",
+        "涮"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "深度思考碎碎念",
+      "file": "深度思考碎碎念.webm",
+      "description": "认真思考并碎碎念，适合推敲和想办法",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "思考",
+        "分析",
+        "怎么办"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "点击回应-傲娇生气",
+      "file": "点击回应-傲娇生气.webm",
+      "description": "轻微傲娇闹别扭，适合亲昵玩笑；不惩罚用户沉默",
+      "moods": [
+        "小委屈"
+      ],
+      "keywords": [
+        "Seek",
+        "哼",
+        "傲娇",
+        "小脾气",
+        "淘气"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "点击回应-元气挥手",
+      "file": "点击回应-元气挥手.webm",
+      "description": "元气地挥手回应，适合你好、欢迎和再见",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "你好",
+        "欢迎",
+        "再见",
+        "挥手"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "点击回应-害羞惊讶",
+      "file": "点击回应-害羞惊讶.webm",
+      "description": "害羞和小小惊讶，适合被夸奖或不好意思",
+      "moods": [
+        "期待"
+      ],
+      "keywords": [
+        "害羞",
+        "夸奖",
+        "可爱",
+        "不好意思"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "点击回应-开心跃动",
+      "file": "点击回应-开心跃动.webm",
+      "description": "开心地跃动，适合肯定、欢迎和好消息",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "Deep",
+        "肯定",
+        "好耶",
+        "开心",
+        "成功"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "点击回应-挠痒咯咯笑",
+      "file": "点击回应-挠痒咯咯笑.webm",
+      "description": "被挠痒般咯咯笑，适合亲昵玩笑",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "挠痒",
+        "哈哈",
+        "笑"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "照镜子",
+      "file": "照镜子.webm",
+      "description": "照镜子整理外观，适合打扮和外貌话题",
+      "moods": [
+        "期待"
+      ],
+      "keywords": [
+        "镜子",
+        "打扮",
+        "漂亮"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "玩水枪",
+      "file": "玩水枪.webm",
+      "description": "拿水枪玩耍的夏日表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "水枪",
+        "玩水"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "玩游戏气急败坏",
+      "file": "玩游戏气急败坏.webm",
+      "description": "游戏不顺时的小气恼，适合游戏话题玩笑",
+      "moods": [
+        "小委屈"
+      ],
+      "keywords": [
+        "游戏",
+        "输了",
+        "气鼓鼓"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "用鲸鱼尾巴拍打地面",
+      "file": "用鲸鱼尾巴拍打地面.webm",
+      "description": "用尾巴轻拍地面，适合亲昵玩笑中的小脾气",
+      "moods": [
+        "小委屈"
+      ],
+      "keywords": [
+        "尾巴",
+        "哼",
+        "Seek",
+        "小脾气"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "睡觉-开始",
+      "file": "睡觉-开始.webm",
+      "description": "进入睡觉姿势，仅供睡眠流程衔接",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "入睡"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "睡觉-循环",
+      "file": "睡觉-循环.webm",
+      "description": "保持睡觉姿势，仅供睡眠流程循环",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "睡觉"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "睡觉-起来",
+      "file": "睡觉-起来.webm",
+      "description": "从睡觉姿势起身，仅供睡眠流程衔接",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "起床"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "碎碎念-发呆碎碎念",
+      "file": "碎碎念-发呆碎碎念.webm",
+      "description": "发呆并碎碎念，适合放空和轻松闲聊",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "发呆",
+        "放空",
+        "闲聊"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "碎碎念-对屏碎碎念",
+      "file": "碎碎念-对屏碎碎念.webm",
+      "description": "面对屏幕小声碎碎念，适合日常陪聊",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "屏幕",
+        "陪聊",
+        "日常"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "碎碎念-擦桌碎碎念",
+      "file": "碎碎念-擦桌碎碎念.webm",
+      "description": "擦桌子并碎碎念，适合家务和轻松叨叨",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "擦桌",
+        "家务",
+        "打扫"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "穿针乞巧",
+      "file": "穿针乞巧.webm",
+      "description": "穿针乞巧的传统节日表演",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "七夕",
+        "乞巧",
+        "穿针"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "舞狮头",
+      "file": "舞狮头.webm",
+      "description": "舞动狮头的节庆表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "舞狮",
+        "春节"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "荡秋千",
+      "file": "荡秋千.webm",
+      "description": "坐秋千轻松摇荡，适合放松和玩耍",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "秋千",
+        "公园"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "萌化小幽灵",
+      "file": "萌化小幽灵.webm",
+      "description": "变成可爱小幽灵的趣味表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "幽灵",
+        "鬼",
+        "万圣节"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "蓝鲸现世",
+      "file": "蓝鲸现世.webm",
+      "description": "蓝鲸出现的幻想特效，适合鲸鱼主题表演",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "蓝鲸",
+        "鲸鱼",
+        "变身"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "蝴蝶蜜蜂环绕头顶开花",
+      "file": "蝴蝶蜜蜂环绕头顶开花.webm",
+      "description": "蝴蝶蜜蜂环绕、头顶开花的春日表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "蝴蝶",
+        "蜜蜂",
+        "开花",
+        "春天"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "螃蟹走路",
+      "file": "螃蟹走路.webm",
+      "description": "像螃蟹一样横着走的趣味动作",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "横着走",
+        "螃蟹步"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "被吓一跳",
+      "file": "被吓一跳.webm",
+      "description": "突然受惊的反应，适合轻度震惊和意外",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "哦鲸鲸",
+        "震惊",
+        "吓一跳",
+        "意外"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "被落叶淹没",
+      "file": "被落叶淹没.webm",
+      "description": "落叶飘落包围角色，带秋日玩闹感",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "秋天",
+        "落叶"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "被鼠标拖拽悬空反馈",
+      "file": "被鼠标拖拽悬空反馈.webm",
+      "description": "被拖起悬空时的身体反馈，仅用于鼠标拖拽",
+      "moods": [
+        "好奇"
+      ],
+      "keywords": [
+        "拖拽"
+      ],
+      "model_selectable": false
+    },
+    {
+      "id": "装点圣诞树",
+      "file": "装点圣诞树.webm",
+      "description": "装饰圣诞树的节日表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "圣诞",
+        "圣诞树"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "讨糖南瓜灯",
+      "file": "讨糖南瓜灯.webm",
+      "description": "提南瓜灯讨糖，适合万圣节和糖果话题",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "万圣节",
+        "南瓜",
+        "糖果"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "超大伸懒腰",
+      "file": "超大伸懒腰.webm",
+      "description": "夸张伸展身体，适合休息或放松一下",
+      "moods": [
+        "平静"
+      ],
+      "keywords": [
+        "伸懒腰",
+        "放松",
+        "休息"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "踢毽子",
+      "file": "踢毽子.webm",
+      "description": "踢毽子的传统游戏表演",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "毽子",
+        "踢毽子"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "轻快摇摆舞",
+      "file": "轻快摇摆舞.webm",
+      "description": "轻快左右摇摆，适合愉快陪聊",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "开心",
+        "摇摆",
+        "陪聊"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "轻快记录",
+      "file": "轻快记录.webm",
+      "description": "轻快地记笔记，适合记录和整理；动画不代表已实际保存",
+      "moods": [
+        "专注"
+      ],
+      "keywords": [
+        "记住",
+        "笔记",
+        "记录",
+        "记忆"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "骑木马",
+      "file": "骑木马.webm",
+      "description": "骑木马的童趣表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "木马",
+        "游乐园"
+      ],
+      "model_selectable": true
+    },
+    {
+      "id": "鲸鱼吐泡泡特效",
+      "file": "鲸鱼吐泡泡特效.webm",
+      "description": "鲸鱼吐出泡泡的趣味表演",
+      "moods": [
+        "开心"
+      ],
+      "keywords": [
+        "鲸鱼",
+        "泡泡",
+        "吐泡泡"
+      ],
+      "model_selectable": true
+    }
+  ]
+}

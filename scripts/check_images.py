@@ -1,4 +1,4 @@
-"""Real text-model image check using generated fixtures and isolated memories."""
+"""Image/sticker compatibility check in explicit metadata-only mode."""
 from __future__ import annotations
 
 import hashlib
@@ -22,7 +22,7 @@ def main():
     LOCAL.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="images-check-", dir=LOCAL) as directory:
         root = Path(directory)
-        settings = Settings(data_dir=str(root / "data"), proactive_enabled=False, adaptive_enabled=False)
+        settings = Settings(data_dir=str(root / "data"), proactive_enabled=False, adaptive_enabled=False, vision_mode="off")
         core = Companion(settings)
         recovered = None
         try:
